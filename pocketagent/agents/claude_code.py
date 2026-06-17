@@ -26,13 +26,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from pathlib import Path
 from typing import Any, AsyncIterator, Sequence
 
 from ..core.agent import Agent, AgentSession
+from ..core.attachments import save_files
 from ..core.types import Event, EventType, FileAttachment, ImageAttachment
-
-ATTACHMENTS_DIRNAME = ".pocketagent/attachments"
 
 
 def translate_message(msg: dict[str, Any]) -> list[Event]:
@@ -137,17 +135,7 @@ def _build_user_message(
 
 
 def _save_files(work_dir: str, files: Sequence[FileAttachment]) -> list[str]:
-    if not files:
-        return []
-    attach_dir = Path(work_dir) / ATTACHMENTS_DIRNAME
-    attach_dir.mkdir(parents=True, exist_ok=True)
-    paths = []
-    for i, f in enumerate(files):
-        name = Path(f.file_name or f"file_{i}").name or f"file_{i}"
-        path = attach_dir / name
-        path.write_bytes(f.data)
-        paths.append(str(path))
-    return paths
+    return save_files(work_dir, files)
 
 
 class ClaudeCodeSession(AgentSession):

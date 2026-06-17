@@ -1,10 +1,9 @@
 """Discord platform backed by discord.py.
 
-Behavior mirrors cc-connect's Discord platform for the subset implemented in
-this pass: DMs are always dispatched; guild channel messages only dispatch
-when the bot is @mentioned (the mention is stripped before handing the
-message to the engine). No threads/buttons/slash-commands yet -- plain text
-messaging only.
+DMs are always dispatched; guild channel messages only dispatch when the
+bot is @mentioned (the mention is stripped before handing the message to
+the engine). No threads/buttons/slash-commands yet -- plain text messaging
+only.
 """
 
 from __future__ import annotations

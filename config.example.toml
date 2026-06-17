@@ -25,6 +25,19 @@ command = "claude"           # path to the Claude Code CLI binary
 model = ""                   # optional model override, e.g. "claude-opus-4-8"
 permission_mode = "default"  # default | acceptEdits | plan | bypassPermissions
 
+# Alternative agent backend: drives a persistent tmux pane as an interactive
+# shell agent instead of speaking a structured protocol. Useful for CLIs
+# that only offer a TUI. Each workspace dir gets its own tmux window inside
+# the configured session.
+[agents.tmux]
+session = "pocketagent"      # tmux session name (created if missing)
+init_command = "claude"      # command to run once when a new window starts
+# pane = "0"                 # legacy session:pane target when work_dir is "."
+# auto_create = true         # create the session/window if it doesn't exist
+# prompt_pattern = '[❯\$#>%]\s*$'  # regex; pane is "done" once stable and matching
+# poll_interval_ms = 200     # how often to poll capture-pane while waiting
+# strip_input_block = true   # strip Claude Code's ───/❯/─── input box from output
+
 # --- Custom commands ---------------------------------------------------------
 # "/deploy api prod" -> "Deploy api to the prod environment and report status."
 [commands.deploy]

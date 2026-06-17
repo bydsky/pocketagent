@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .agents.claude_code import ClaudeCodeAgent
+from .agents.tmux import DEFAULT_PROMPT_PATTERN, TmuxAgent
 from .core.agent import Agent
 from .core.commands import CommandRegistry, CustomCommand
 from .core.engine import Engine
@@ -87,6 +88,18 @@ AGENT_FACTORIES: dict[str, AgentFactory] = {
         model=opts.get("model", ""),
         permission_mode=opts.get("permission_mode", "default"),
         extra_args=opts.get("extra_args", []),
+    ),
+    "tmux": lambda opts: TmuxAgent(
+        session=opts.get("session", ""),
+        pane=opts.get("pane", "0"),
+        auto_create=opts.get("auto_create", True),
+        shell=opts.get("shell", ""),
+        init_command=opts.get("init_command", ""),
+        startup_wait_ms=opts.get("startup_wait_ms", 0),
+        prompt_pattern=opts.get("prompt_pattern", DEFAULT_PROMPT_PATTERN),
+        poll_interval_ms=opts.get("poll_interval_ms", 200),
+        strip_input_block=opts.get("strip_input_block", True),
+        strip_patterns=opts.get("strip_patterns"),
     ),
 }
 
