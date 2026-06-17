@@ -1,0 +1,28 @@
+[project]
+name = "pocketagent"
+version = "0.1.0"
+description = "Bridge connecting chat platforms (Discord, Slack, Telegram) to AI coding agents (Claude Code, Gemini CLI, tmux)"
+requires-python = ">=3.11"
+dependencies = [
+    "discord.py>=2.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+pocketagent = "pocketagent.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pocketagent*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

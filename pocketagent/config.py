@@ -1,0 +1,142 @@
+"""Loads pocketagent.toml and builds the wired-up runtime objects."""
+
+from __future__ import annotations
+
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from .agents.claude_code import ClaudeCodeAgent
+from .core.agent import Agent
+from .core.commands import CommandRegistry, CustomCommand
+from .core.engine import Engine
+from .core.platform import Platform
+from .core.router import ChannelOverride, Router
+from .core.session_store import SessionStore
+from .core.workspace import WorkspaceManager
+
+
+@dataclass
+class PlatformConfig:
+    name: str
+    options: dict[str, Any]
+    default_agent: str
+    base_dir: str
+    channels: dict[str, ChannelOverride] = field(default_factory=dict)
+
+
+@dataclass
+class AppConfig:
+    state_dir: str
+    platforms: dict[str, PlatformConfig]
+    agent_options: dict[str, dict[str, Any]]
+    commands: CommandRegistry
+
+
+def load_config(path: str | Path) -> AppConfig:
+    data = tomllib.loads(Path(path).read_text())
+
+    state_dir = str(Path(data.get("state_dir", "~/.pocketagent")).expanduser())
+
+    platforms: dict[str, PlatformConfig] = {}
+    for name, raw in data.get("platforms", {}).items():
+        if "base_dir" not in raw:
+            raise ValueError(f"platforms.{name}: base_dir is required")
+        if "default_agent" not in raw:
+            raise ValueError(f"platforms.{name}: default_agent is required")
+        channels = {
+            str(channel_id): ChannelOverride(
+                agent=channel_cfg.get("agent"), workspace=channel_cfg.get("workspace")
+            )
+            for channel_id, channel_cfg in raw.get("channels", {}).items()
+        }
+        options = {k: v for k, v in raw.items() if k not in ("channels", "default_agent", "base_dir")}
+        platforms[name] = PlatformConfig(
+            name=name,
+            options=options,
+            default_agent=raw["default_agent"],
+            base_dir=str(Path(raw["base_dir"]).expanduser()),
+            channels=channels,
+        )
+
+    commands = CommandRegistry()
+    for name, raw in data.get("commands", {}).items():
+        commands.add(
+            CustomCommand(
+                name=name,
+                prompt=raw.get("prompt"),
+                exec=raw.get("exec"),
+                description=raw.get("description", ""),
+            )
+        )
+
+    return AppConfig(
+        state_dir=state_dir,
+        platforms=platforms,
+        agent_options=data.get("agents", {}),
+        commands=commands,
+    )
+
+
+AgentFactory = Callable[[dict[str, Any]], Agent]
+
+AGENT_FACTORIES: dict[str, AgentFactory] = {
+    "claude_code": lambda opts: ClaudeCodeAgent(
+        command=opts.get("command", "claude"),
+        model=opts.get("model", ""),
+        permission_mode=opts.get("permission_mode", "default"),
+        extra_args=opts.get("extra_args", []),
+    ),
+}
+
+
+def build_agents(agent_options: dict[str, dict[str, Any]]) -> dict[str, Agent]:
+    agents: dict[str, Agent] = {}
+    for name, opts in agent_options.items():
+        kind = opts.get("type", name)
+        factory = AGENT_FACTORIES.get(kind)
+        if factory is None:
+            raise ValueError(f"agents.{name}: unknown agent type '{kind}'")
+        agents[name] = factory(opts)
+    return agents
+
+
+def build_discord_platform(cfg: PlatformConfig) -> Platform:
+    from .platforms.discord_platform import DiscordPlatform
+
+    return DiscordPlatform(
+        token=cfg.options.get("token", ""),
+        allow_from=cfg.options.get("allow_from", ""),
+        require_mention=cfg.options.get("require_mention", True),
+    )
+
+
+PLATFORM_FACTORIES: dict[str, Callable[[PlatformConfig], Platform]] = {
+    "discord": build_discord_platform,
+}
+
+
+def build_app(config: AppConfig) -> tuple[dict[str, Platform], Engine]:
+    """Build platform instances and the Engine that wires them to agents."""
+
+    agents = build_agents(config.agent_options)
+
+    platforms: dict[str, Platform] = {}
+    routers: dict[str, Router] = {}
+    for name, platform_cfg in config.platforms.items():
+        factory = PLATFORM_FACTORIES.get(name)
+        if factory is None:
+            raise ValueError(f"platforms.{name}: unknown platform type '{name}'")
+        platforms[name] = factory(platform_cfg)
+
+        workspace = WorkspaceManager(platform_cfg.base_dir)
+        routers[name] = Router(
+            default_agent=platform_cfg.default_agent,
+            workspace=workspace,
+            channels=platform_cfg.channels,
+        )
+
+    session_store = SessionStore(Path(config.state_dir) / "sessions.json")
+    engine = Engine(agents=agents, routers=routers, session_store=session_store, commands=config.commands)
+    return platforms, engine

@@ -1,0 +1,36 @@
+# pocketagent config example
+#
+# State (session resume ids) is kept under state_dir.
+state_dir = "~/.pocketagent"
+
+# --- Platforms -------------------------------------------------------------
+
+[platforms.discord]
+token = "PUT_YOUR_DISCORD_BOT_TOKEN_HERE"
+allow_from = ""              # comma-separated user IDs; empty = allow everyone
+require_mention = true       # require @mention in guild channels (DMs always work)
+default_agent = "claude_code"
+base_dir = "~/pocketagent-workspaces/discord"
+
+# Optional per-channel overrides. Without an entry here, a channel gets the
+# default_agent and a workspace folder named after the channel.
+[platforms.discord.channels."123456789012345678"]
+agent = "claude_code"
+workspace = "support-bot"    # fixed folder name instead of the channel's own name
+
+# --- Agents ------------------------------------------------------------------
+
+[agents.claude_code]
+command = "claude"           # path to the Claude Code CLI binary
+model = ""                   # optional model override, e.g. "claude-opus-4-8"
+permission_mode = "default"  # default | acceptEdits | plan | bypassPermissions
+
+# --- Custom commands ---------------------------------------------------------
+# "/deploy api prod" -> "Deploy api to the prod environment and report status."
+[commands.deploy]
+prompt = "Deploy {{1}} to the {{2:staging}} environment and report status."
+
+# "/status" runs `git status` in the channel's workspace folder and replies
+# with the raw output instead of going through the agent.
+[commands.status]
+exec = "git status"
