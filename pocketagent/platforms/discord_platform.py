@@ -2,8 +2,10 @@
 
 DMs are always dispatched; guild channel messages only dispatch when the
 bot is @mentioned (the mention is stripped before handing the message to
-the engine). No threads/buttons/slash-commands yet -- plain text messaging
-only.
+the engine). group_reply_all_guilds lifts the mention requirement for
+specific guilds (or "*" for all); require_mention_channels re-imposes it
+for specific channels even inside those guilds. No threads/buttons/
+slash-commands yet -- plain text messaging only.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ import logging
 
 import discord
 
-from ..core.platform import MessageHandler, Platform, allow_list
+from ..core.platform import MessageHandler, Platform, allow_list, csv_contains
 from ..core.textsplit import split_message
 from ..core.types import FileAttachment, ImageAttachment, Message
 
@@ -49,12 +51,21 @@ async def _classify_attachments(
 class DiscordPlatform(Platform):
     name = "discord"
 
-    def __init__(self, token: str, allow_from: str = "", require_mention: bool = True) -> None:
+    def __init__(
+        self,
+        token: str,
+        allow_from: str = "",
+        require_mention: bool = True,
+        group_reply_all_guilds: str = "",
+        require_mention_channels: str = "",
+    ) -> None:
         if not token:
             raise ValueError("discord: token is required")
         self.token = token
         self.allow_from = allow_from
         self.require_mention = require_mention
+        self.group_reply_all_guilds = group_reply_all_guilds
+        self.require_mention_channels = require_mention_channels
         self._client: discord.Client | None = None
         self._gateway_task: asyncio.Task | None = None
         self._handler: MessageHandler | None = None
@@ -95,8 +106,14 @@ class DiscordPlatform(Platform):
         content = message.content
         is_guild = message.guild is not None
         if is_guild:
+            needs_mention = self.require_mention
+            if csv_contains(self.group_reply_all_guilds, str(message.guild.id)):
+                needs_mention = False
+            if csv_contains(self.require_mention_channels, str(message.channel.id)):
+                needs_mention = True
+
             mentioned = client.user in message.mentions
-            if self.require_mention and not mentioned:
+            if needs_mention and not mentioned:
                 return
             content = content.replace(f"<@{client.user.id}>", "").replace(
                 f"<@!{client.user.id}>", ""

@@ -122,6 +122,8 @@ def build_discord_platform(cfg: PlatformConfig) -> Platform:
         token=cfg.options.get("token", ""),
         allow_from=cfg.options.get("allow_from", ""),
         require_mention=cfg.options.get("require_mention", True),
+        group_reply_all_guilds=cfg.options.get("group_reply_all_guilds", ""),
+        require_mention_channels=cfg.options.get("require_mention_channels", ""),
     )
 
 

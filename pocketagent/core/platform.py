@@ -43,3 +43,19 @@ def allow_list(allow_from: str, user_id: str) -> bool:
     return any(
         part.strip().lower() == user_id.lower() for part in allow_from.split(",")
     )
+
+
+def csv_contains(csv: str, value: str) -> bool:
+    """Check whether value is present in a comma-separated id list.
+
+    Unlike allow_list, an empty list means "matches nothing" (the opposite
+    default), since this is used for opt-in overrides like
+    group_reply_all_guilds rather than access control. "*" matches
+    everything. Comparison is case-insensitive.
+    """
+    csv = csv.strip()
+    if csv == "":
+        return False
+    if csv == "*":
+        return True
+    return any(part.strip().lower() == value.lower() for part in csv.split(","))

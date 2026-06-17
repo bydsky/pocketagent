@@ -9,6 +9,10 @@ state_dir = "~/.pocketagent"
 token = "PUT_YOUR_DISCORD_BOT_TOKEN_HERE"
 allow_from = ""              # comma-separated user IDs; empty = allow everyone
 require_mention = true       # require @mention in guild channels (DMs always work)
+# group_reply_all_guilds = ""      # comma-separated guild IDs ("*" = all) that don't
+                                    # need @mention even though require_mention is true
+# require_mention_channels = ""    # comma-separated channel IDs that always need
+                                    # @mention, even inside a group_reply_all_guilds guild
 default_agent = "claude_code"
 base_dir = "~/pocketagent-workspaces/discord"
 
