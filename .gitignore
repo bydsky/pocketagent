@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 pocketagent.toml
 config.toml
+.pocketagent/
