@@ -59,9 +59,15 @@ interfaces — `core/engine.py` does not need to change.
 
 Supporting pieces in `core/`:
 
-- **`router.py`**: resolves `(agent_name, work_dir)` for a channel. A platform has one
-  `default_agent`; per-channel-id `ChannelOverride`s can pin a different agent and/or a
-  fixed workspace folder name.
+- **`router.py`**: resolves `(agent_name, work_dir, platform_system_prompt)` for a
+  channel. A platform has one `default_agent` and one optional `platform_system_prompt`
+  (applied to every channel on that platform); per-channel-id `ChannelOverride`s can pin
+  a different agent and/or a fixed workspace folder name. `platform_system_prompt` is
+  passed to `Agent.start_session`, where it's combined with that agent's own
+  `agent_system_prompt` (a constructor-time option set per agent in config, e.g.
+  `[agents.claude_code]`). The claude_code backend joins the two and forwards them via
+  `--append-system-prompt`; the tmux backend has no generic way to apply either to an
+  arbitrary terminal program and logs a warning instead.
 - **`workspace.py`** (`WorkspaceManager`): maps a channel to a sanitized, collision-free
   directory name under the platform's `base_dir`, persisting the mapping in
   `.pocketagent-bindings.json` so a later channel rename doesn't orphan the workspace.

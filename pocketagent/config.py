@@ -88,6 +88,7 @@ AGENT_FACTORIES: dict[str, AgentFactory] = {
         model=opts.get("model", ""),
         permission_mode=opts.get("permission_mode", "default"),
         extra_args=opts.get("extra_args", []),
+        agent_system_prompt=opts.get("agent_system_prompt", ""),
     ),
     "tmux": lambda opts: TmuxAgent(
         session=opts.get("session", ""),
@@ -100,6 +101,7 @@ AGENT_FACTORIES: dict[str, AgentFactory] = {
         poll_interval_ms=opts.get("poll_interval_ms", 200),
         strip_input_block=opts.get("strip_input_block", True),
         strip_patterns=opts.get("strip_patterns"),
+        agent_system_prompt=opts.get("agent_system_prompt", ""),
     ),
 }
 
@@ -151,6 +153,7 @@ def build_app(config: AppConfig) -> tuple[dict[str, Platform], Engine]:
             default_agent=platform_cfg.default_agent,
             workspace=workspace,
             channels=platform_cfg.channels,
+            platform_system_prompt=platform_cfg.options.get("platform_system_prompt", ""),
         )
 
     session_store = SessionStore(Path(config.state_dir) / "sessions.json")

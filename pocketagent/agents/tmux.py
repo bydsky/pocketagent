@@ -20,6 +20,7 @@ configured session:pane target.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -28,6 +29,8 @@ from typing import AsyncIterator, Sequence
 from ..core.agent import Agent, AgentSession
 from ..core.attachments import save_files
 from ..core.types import Event, EventType, FileAttachment, ImageAttachment
+
+logger = logging.getLogger(__name__)
 
 # Matches common shell prompts and Claude Code's ❯ prompt.
 DEFAULT_PROMPT_PATTERN = r"[❯\$#>%]\s*$"
@@ -375,6 +378,7 @@ class TmuxAgent(Agent):
         poll_interval_ms: int = 200,
         strip_input_block: bool = True,
         strip_patterns: Sequence[str] | None = None,
+        agent_system_prompt: str = "",
     ) -> None:
         if not session:
             raise ValueError("tmux: 'session' option is required (name of the tmux session to attach)")
@@ -391,8 +395,16 @@ class TmuxAgent(Agent):
         self.poll_interval_ms = poll_interval_ms if poll_interval_ms > 0 else 200
         self.strip_input_block = strip_input_block
         self.strip_patterns = list(strip_patterns) if strip_patterns is not None else list(DEFAULT_STRIP_PATTERNS)
+        self.agent_system_prompt = agent_system_prompt
 
-    async def start_session(self, session_id: str | None, work_dir: str) -> AgentSession:
+    async def start_session(
+        self, session_id: str | None, work_dir: str, platform_system_prompt: str = ""
+    ) -> AgentSession:
+        if self.agent_system_prompt or platform_system_prompt:
+            logger.warning(
+                "tmux: agent_system_prompt/platform_system_prompt is configured but the "
+                "tmux agent has no way to apply one to an arbitrary terminal program; ignoring it"
+            )
         target, window_name = resolve_target(self.session_name, self.pane, work_dir)
 
         session_exists = await tmux_session_exists(self.session_name)

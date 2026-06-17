@@ -63,7 +63,7 @@ class Engine:
 
         async with platform.typing(msg.reply_ctx):
             session = await self.session_store.get_or_create(
-                msg.session_key, agent, str(route.work_dir)
+                msg.session_key, agent, str(route.work_dir), route.platform_system_prompt
             )
             await session.send(msg.content, msg.images, msg.files)
 

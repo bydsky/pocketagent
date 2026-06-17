@@ -80,6 +80,42 @@ def test_agent_requires_session_name():
         TmuxAgent(session="")
 
 
+@pytest.mark.asyncio
+async def test_start_session_warns_and_ignores_platform_system_prompt(tmp_path, monkeypatch, caplog):
+    import pocketagent.agents.tmux as tmux_module
+
+    async def fake_tmux(*args):
+        return 0, ""
+
+    monkeypatch.setattr(tmux_module, "_tmux", fake_tmux)
+
+    agent = TmuxAgent(session="pocketagent-test-session")
+    with caplog.at_level("WARNING"):
+        session = await agent.start_session(None, str(tmp_path), platform_system_prompt="Be concise.")
+    try:
+        assert any("system_prompt" in r.message for r in caplog.records)
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_warns_and_ignores_agent_system_prompt(tmp_path, monkeypatch, caplog):
+    import pocketagent.agents.tmux as tmux_module
+
+    async def fake_tmux(*args):
+        return 0, ""
+
+    monkeypatch.setattr(tmux_module, "_tmux", fake_tmux)
+
+    agent = TmuxAgent(session="pocketagent-test-session", agent_system_prompt="Prefer small diffs.")
+    with caplog.at_level("WARNING"):
+        session = await agent.start_session(None, str(tmp_path))
+    try:
+        assert any("system_prompt" in r.message for r in caplog.records)
+    finally:
+        await session.close()
+
+
 @pytest.mark.skipif(not TMUX_AVAILABLE, reason="tmux not installed")
 def test_resolve_target_unique_per_work_dir():
     target1, win1 = resolve_target("mywork", "0", "/repo/a/app")

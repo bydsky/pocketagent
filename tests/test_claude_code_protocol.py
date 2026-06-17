@@ -281,3 +281,81 @@ async def test_start_session_passes_print_and_verbose(monkeypatch):
         assert "--verbose" in captured["args"]
     finally:
         await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_appends_platform_system_prompt_when_given(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent()
+    session = await agent.start_session(None, "/tmp", platform_system_prompt="Be concise.")
+    try:
+        args = captured["args"]
+        assert "--append-system-prompt" in args
+        assert args[args.index("--append-system-prompt") + 1] == "Be concise."
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_appends_agent_system_prompt_when_given(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent(agent_system_prompt="Prefer small diffs.")
+    session = await agent.start_session(None, "/tmp")
+    try:
+        args = captured["args"]
+        assert "--append-system-prompt" in args
+        assert args[args.index("--append-system-prompt") + 1] == "Prefer small diffs."
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_combines_agent_and_platform_system_prompts(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent(agent_system_prompt="Prefer small diffs.")
+    session = await agent.start_session(None, "/tmp", platform_system_prompt="Be concise.")
+    try:
+        args = captured["args"]
+        combined = args[args.index("--append-system-prompt") + 1]
+        assert combined == "Prefer small diffs.\n\nBe concise."
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_omits_system_prompt_flag_when_not_given(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent()
+    session = await agent.start_session(None, "/tmp")
+    try:
+        assert "--append-system-prompt" not in captured["args"]
+    finally:
+        await session.close()

@@ -15,6 +15,21 @@ require_mention = true       # require @mention in guild channels (DMs always wo
                                     # @mention, even inside a group_reply_all_guilds guild
 default_agent = "claude_code"
 base_dir = "~/pocketagent-workspaces/discord"
+# Applied to every channel on this platform, combined with the handling
+# agent's own agent_system_prompt below (claude_code: both joined and sent
+# via --append-system-prompt; tmux: ignored, with a warning logged).
+platform_system_prompt = """
+# Output Markdown Constraints
+-  **NO Native Tables**: Discord does not support standard Markdown tables (e.g., `| Col A | Col B |`).
+-  **Pseudo-Tables**: If you need to present tabular data, you MUST use a "Code Block" with monospaced font alignment.
+    *   Enclose the table in triple backticks
+    *   Use **spaces** (not tabs) to align columns perfectly.
+    *   Include a separator line (e.g., `------`) between headers and rows.
+    *   Keep columns narrow enough to be readable on mobile devices.
+
+-  **Formatting**:
+    *   **Headers**: DO NOT USE markdwon headline 4 `####` as discord doesn't support it!
+"""
 
 # Optional per-channel overrides. Without an entry here, a channel gets the
 # default_agent and a workspace folder named after the channel.
@@ -28,6 +43,9 @@ workspace = "support-bot"    # fixed folder name instead of the channel's own na
 command = "claude"           # path to the Claude Code CLI binary
 model = ""                   # optional model override, e.g. "claude-opus-4-8"
 permission_mode = "default"  # default | acceptEdits | plan | bypassPermissions
+# agent_system_prompt = "You are deployed as a coding assistant; prefer small diffs."
+                              # always-on system prompt for this agent, regardless of
+                              # platform; combined with that platform's platform_system_prompt
 
 # Alternative agent backend: drives a persistent tmux pane as an interactive
 # shell agent instead of speaking a structured protocol. Useful for CLIs
@@ -41,6 +59,9 @@ init_command = "claude"      # command to run once when a new window starts
 # prompt_pattern = '[❯\$#>%]\s*$'  # regex; pane is "done" once stable and matching
 # poll_interval_ms = 200     # how often to poll capture-pane while waiting
 # strip_input_block = true   # strip Claude Code's ───/❯/─── input box from output
+# agent_system_prompt = ""   # accepted for config-shape consistency but ignored --
+                              # the tmux backend has no generic way to apply a system
+                              # prompt to an arbitrary terminal program (logs a warning)
 
 # --- Custom commands ---------------------------------------------------------
 # "/deploy api prod" -> "Deploy api to the prod environment and report status."

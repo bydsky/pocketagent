@@ -5,12 +5,14 @@ stream-json protocol:
 
     claude --print --verbose --input-format stream-json --output-format stream-json \
            --permission-prompt-tool stdio [--resume <id>] [--model <m>] \
-           [--permission-mode <mode>]
+           [--permission-mode <mode>] [--append-system-prompt <text>]
 
 --print is required for non-interactive/stream-json mode at all (without
 it, claude starts its interactive TUI, which immediately exits with no
 TTY attached); --verbose is required by --output-format=stream-json when
-combined with --print.
+combined with --print. --append-system-prompt, if present, carries this
+agent's own agent_system_prompt (a config option) combined with the calling
+platform's platform_system_prompt, joined by a blank line.
 
 Each user turn is written to stdin as one JSON line:
     {"type": "user", "message": {"role": "user", "content": <str-or-blocks>}}
@@ -230,6 +232,11 @@ class ClaudeCodeSession(AgentSession):
                 self._process.kill()
 
 
+def _combine_system_prompts(agent_system_prompt: str, platform_system_prompt: str) -> str:
+    parts = [p for p in (agent_system_prompt, platform_system_prompt) if p]
+    return "\n\n".join(parts)
+
+
 class ClaudeCodeAgent(Agent):
     name = "claude_code"
 
@@ -239,13 +246,17 @@ class ClaudeCodeAgent(Agent):
         model: str = "",
         permission_mode: str = "default",
         extra_args: Sequence[str] = (),
+        agent_system_prompt: str = "",
     ) -> None:
         self.command = command
         self.model = model
         self.permission_mode = permission_mode
         self.extra_args = list(extra_args)
+        self.agent_system_prompt = agent_system_prompt
 
-    async def start_session(self, session_id: str | None, work_dir: str) -> AgentSession:
+    async def start_session(
+        self, session_id: str | None, work_dir: str, platform_system_prompt: str = ""
+    ) -> AgentSession:
         args = [
             "--print",
             "--verbose",
@@ -259,6 +270,9 @@ class ClaudeCodeAgent(Agent):
             args += ["--model", self.model]
         if session_id:
             args += ["--resume", session_id]
+        system_prompt = _combine_system_prompts(self.agent_system_prompt, platform_system_prompt)
+        if system_prompt:
+            args += ["--append-system-prompt", system_prompt]
         args += self.extra_args
 
         process = await asyncio.create_subprocess_exec(

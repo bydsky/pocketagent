@@ -32,7 +32,8 @@ class _FakeAgentSession(AgentSession):
 class _FakeAgent(Agent):
     name = "fake"
 
-    async def start_session(self, session_id, work_dir) -> AgentSession:
+    async def start_session(self, session_id, work_dir, platform_system_prompt="") -> AgentSession:
+        self.last_platform_system_prompt = platform_system_prompt
         return _FakeAgentSession()
 
 
@@ -72,17 +73,18 @@ class _FakePlatform(Platform):
         return _Typing()
 
 
-def _make_engine(tmp_path) -> Engine:
+def _make_engine(tmp_path, platform_system_prompt: str = "") -> tuple[Engine, _FakeAgent]:
     agent = _FakeAgent()
     workspace = WorkspaceManager(tmp_path / "workspace")
-    router = Router(default_agent="fake", workspace=workspace)
+    router = Router(default_agent="fake", workspace=workspace, platform_system_prompt=platform_system_prompt)
     session_store = SessionStore(tmp_path / "sessions.json")
-    return Engine(
+    engine = Engine(
         agents={"fake": agent},
         routers={"fake": router},
         session_store=session_store,
         commands=CommandRegistry(),
     )
+    return engine, agent
 
 
 def _make_message() -> Message:
@@ -98,7 +100,7 @@ def _make_message() -> Message:
 
 @pytest.mark.asyncio
 async def test_on_message_shows_typing_while_agent_works(tmp_path):
-    engine = _make_engine(tmp_path)
+    engine, _ = _make_engine(tmp_path)
     platform = _FakePlatform()
 
     await engine.on_message(platform, _make_message())
@@ -112,7 +114,7 @@ async def test_on_message_shows_typing_while_agent_works(tmp_path):
 
 @pytest.mark.asyncio
 async def test_on_message_typing_exits_even_on_handler_error(tmp_path, monkeypatch):
-    engine = _make_engine(tmp_path)
+    engine, _ = _make_engine(tmp_path)
     platform = _FakePlatform()
     msg = _make_message()
 
@@ -125,3 +127,13 @@ async def test_on_message_typing_exits_even_on_handler_error(tmp_path, monkeypat
 
     assert platform.typing_active is False
     assert platform.replies == ["Sorry, something went wrong handling that message."]
+
+
+@pytest.mark.asyncio
+async def test_on_message_passes_platform_system_prompt_to_agent(tmp_path):
+    engine, agent = _make_engine(tmp_path, platform_system_prompt="You are operating via chat.")
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert agent.last_platform_system_prompt == "You are operating via chat."

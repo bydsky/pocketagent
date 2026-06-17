@@ -45,12 +45,17 @@ class Agent(ABC):
 
     @abstractmethod
     async def start_session(
-        self, session_id: str | None, work_dir: str
+        self, session_id: str | None, work_dir: str, platform_system_prompt: str = ""
     ) -> AgentSession:
         """Create or resume an interactive session rooted at work_dir.
 
         session_id is the previously persisted agent-side session id (if any),
         used to resume a prior conversation. None starts a fresh session.
+        platform_system_prompt, if set, comes from the platform's configured
+        platform_system_prompt and is combined with this agent's own
+        agent_system_prompt (a constructor-time option, set per agent in
+        config); backends with no way to apply either to a session may
+        ignore them.
         """
 
     async def stop(self) -> None:
