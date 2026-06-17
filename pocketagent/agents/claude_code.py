@@ -3,9 +3,14 @@
 Drives `claude` as a persistent subprocess using its bidirectional
 stream-json protocol:
 
-    claude --input-format stream-json --output-format stream-json \
+    claude --print --verbose --input-format stream-json --output-format stream-json \
            --permission-prompt-tool stdio [--resume <id>] [--model <m>] \
            [--permission-mode <mode>]
+
+--print is required for non-interactive/stream-json mode at all (without
+it, claude starts its interactive TUI, which immediately exits with no
+TTY attached); --verbose is required by --output-format=stream-json when
+combined with --print.
 
 Each user turn is written to stdin as one JSON line:
     {"type": "user", "message": {"role": "user", "content": <str-or-blocks>}}
@@ -242,6 +247,8 @@ class ClaudeCodeAgent(Agent):
 
     async def start_session(self, session_id: str | None, work_dir: str) -> AgentSession:
         args = [
+            "--print",
+            "--verbose",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--permission-prompt-tool", "stdio",

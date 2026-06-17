@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pocketagent.agents.claude_code import (
+    ClaudeCodeAgent,
     ClaudeCodeSession,
     _build_user_message,
     _save_files,
@@ -225,5 +226,58 @@ async def test_session_auto_approves_permission_request(tmp_path):
         assert any(e.type == EventType.PERMISSION_REQUEST for e in events)
         result_events = [e for e in events if e.done]
         assert result_events[0].content == "approved"
+    finally:
+        await session.close()
+
+
+# --- ClaudeCodeAgent.start_session builds the right CLI invocation ----------
+
+
+class _FakeStdin:
+    def write(self, data: bytes) -> None:
+        pass
+
+    async def drain(self) -> None:
+        pass
+
+
+class _FakeStdout:
+    async def readline(self) -> bytes:
+        return b""  # immediate EOF, so the reader task exits cleanly
+
+
+class _FakeProcess:
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.stdin = _FakeStdin()
+        self.stdout = _FakeStdout()
+
+    def terminate(self) -> None:
+        self.returncode = 0
+
+    async def wait(self) -> int:
+        return 0
+
+
+@pytest.mark.asyncio
+async def test_start_session_passes_print_and_verbose(monkeypatch):
+    # --print is required for claude to run non-interactively at all (without
+    # it, claude starts its interactive TUI, which immediately exits with no
+    # TTY attached -- the bug this test guards against); --verbose is
+    # required by --output-format=stream-json when combined with --print.
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["command"] = command
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent()
+    session = await agent.start_session(None, "/tmp")
+    try:
+        assert "--print" in captured["args"]
+        assert "--verbose" in captured["args"]
     finally:
         await session.close()
