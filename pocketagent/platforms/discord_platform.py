@@ -211,7 +211,7 @@ class DiscordPlatform(Platform):
             return
         message: discord.Message = reply_ctx
         for chunk in split_message(content, MAX_DISCORD_LEN):
-            await message.reply(chunk)
+            await message.channel.send(chunk)
 
     async def send(self, reply_ctx, content: str) -> None:
         if isinstance(reply_ctx, discord.Interaction):
@@ -221,6 +221,12 @@ class DiscordPlatform(Platform):
         message: discord.Message = reply_ctx
         for chunk in split_message(content, MAX_DISCORD_LEN):
             await message.channel.send(chunk)
+
+    def typing(self, reply_ctx):
+        channel = getattr(reply_ctx, "channel", None)
+        if channel is None:
+            return super().typing(reply_ctx)
+        return channel.typing()
 
     async def stop(self) -> None:
         if self._client is not None:

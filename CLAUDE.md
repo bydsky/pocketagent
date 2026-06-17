@@ -39,12 +39,15 @@ platform-agnostic `Message` -> `Engine.on_message` -> `CommandRegistry.expand` (
 `/command` rewrite, if matched) -> `Router.resolve` (which agent + workspace dir for this
 channel) -> `SessionStore.get_or_create` (reuse a live `AgentSession` or resume one from a
 persisted session id) -> `AgentSession.send` + `AgentSession.events()` streamed back ->
-`Platform.reply`.
+`Platform.reply`. The agent-waiting part (and the `exec`-command branch) runs inside
+`async with platform.typing(msg.reply_ctx):` so platforms with a native "working"
+indicator (Discord's typing dots) can show one for the duration.
 
 Everything platform/agent-specific is hidden behind two ABCs in `pocketagent/core/`:
 
 - **`Platform`** (`core/platform.py`): `start(handler)`, `reply(reply_ctx, content)`,
-  `send(reply_ctx, content)`, `stop()`. One implementation per chat platform lives in
+  `send(reply_ctx, content)`, `stop()`, and `typing(reply_ctx)` (optional, default no-op
+  async context manager). One implementation per chat platform lives in
   `pocketagent/platforms/` (currently `discord_platform.py`).
 - **`Agent`** / **`AgentSession`** (`core/agent.py`): `Agent.start_session(session_id,
   work_dir)` returns an `AgentSession` with `send(prompt, images, files)`,

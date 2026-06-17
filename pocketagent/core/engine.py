@@ -48,7 +48,8 @@ class Engine:
         if expanded is not None:
             cmd, expanded_text = expanded
             if cmd.exec is not None:
-                output = await self._run_exec(expanded_text, str(route.work_dir))
+                async with platform.typing(msg.reply_ctx):
+                    output = await self._run_exec(expanded_text, str(route.work_dir))
                 await platform.reply(msg.reply_ctx, output)
                 return
             msg.content = expanded_text
@@ -60,26 +61,27 @@ class Engine:
             )
             return
 
-        session = await self.session_store.get_or_create(
-            msg.session_key, agent, str(route.work_dir)
-        )
-        await session.send(msg.content, msg.images, msg.files)
+        async with platform.typing(msg.reply_ctx):
+            session = await self.session_store.get_or_create(
+                msg.session_key, agent, str(route.work_dir)
+            )
+            await session.send(msg.content, msg.images, msg.files)
 
-        text_parts: list[str] = []
-        async for event in session.events():
-            if event.session_id:
-                self.session_store.set_resume_id(msg.session_key, event.session_id)
-            if event.type == EventType.TEXT:
-                text_parts.append(event.content)
-            if event.done:
-                if event.type == EventType.ERROR:
-                    error_text = event.error or "agent reported an error"
-                    await platform.reply(msg.reply_ctx, f"Error: {error_text}")
+            text_parts: list[str] = []
+            async for event in session.events():
+                if event.session_id:
+                    self.session_store.set_resume_id(msg.session_key, event.session_id)
+                if event.type == EventType.TEXT:
+                    text_parts.append(event.content)
+                if event.done:
+                    if event.type == EventType.ERROR:
+                        error_text = event.error or "agent reported an error"
+                        await platform.reply(msg.reply_ctx, f"Error: {error_text}")
+                        return
+                    final_text = "".join(text_parts) or event.content
+                    if final_text:
+                        await platform.reply(msg.reply_ctx, final_text)
                     return
-                final_text = "".join(text_parts) or event.content
-                if final_text:
-                    await platform.reply(msg.reply_ctx, final_text)
-                return
 
     async def _run_exec(self, command: str, work_dir: str) -> str:
         proc = await asyncio.create_subprocess_shell(

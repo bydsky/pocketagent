@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, Awaitable, Callable
+from typing import Any, AsyncContextManager, Awaitable, Callable
 
 from .types import Message
 
 MessageHandler = Callable[["Platform", Message], Awaitable[None]]
+
+
+@contextlib.asynccontextmanager
+async def _no_typing():
+    yield
 
 
 class Platform(ABC):
@@ -30,6 +36,14 @@ class Platform(ABC):
     @abstractmethod
     async def stop(self) -> None:
         """Disconnect from the platform."""
+
+    def typing(self, reply_ctx: Any) -> AsyncContextManager[None]:
+        """Show a "working" indicator for the duration of the returned block.
+
+        Default: no-op. Platforms with a native typing indicator (e.g.
+        Discord) override this; others can ignore it.
+        """
+        return _no_typing()
 
 
 def allow_list(allow_from: str, user_id: str) -> bool:

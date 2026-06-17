@@ -273,3 +273,43 @@ async def test_send_uses_followup_for_interaction():
     await platform.send(interaction, "hi there")
 
     interaction.followup.send.assert_awaited_once_with("hi there")
+
+
+# --- typing indicator ------------------------------------------------------------
+
+
+class _FakeTypingChannel:
+    def __init__(self):
+        self.entered = False
+        self.exited = False
+
+    def typing(self):
+        return self
+
+    async def __aenter__(self):
+        self.entered = True
+        return self
+
+    async def __aexit__(self, *exc):
+        self.exited = True
+        return False
+
+
+@pytest.mark.asyncio
+async def test_typing_uses_channel_typing_indicator():
+    platform = DiscordPlatform(token="t")
+    channel = _FakeTypingChannel()
+    reply_ctx = Mock(channel=channel)
+
+    async with platform.typing(reply_ctx):
+        assert channel.entered
+    assert channel.exited
+
+
+@pytest.mark.asyncio
+async def test_typing_falls_back_to_noop_without_channel():
+    platform = DiscordPlatform(token="t")
+    reply_ctx = Mock(spec=[])  # no .channel attribute
+
+    async with platform.typing(reply_ctx):
+        pass  # must not raise
