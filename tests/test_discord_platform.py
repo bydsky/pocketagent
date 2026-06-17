@@ -47,6 +47,7 @@ class _FakeChannel:
     def __init__(self, id: int, name: str = ""):
         self.id = id
         self.name = name
+        self.send = AsyncMock()
 
 
 class _FakeMessage:
@@ -227,7 +228,7 @@ async def test_slash_command_dispatches_through_handler():
 
     await platform._on_slash_command(interaction, "english", "hola mundo")
 
-    interaction.response.defer.assert_awaited_once()
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
     assert len(received) == 1
     msg = received[0]
     assert msg.content == "/english hola mundo"
@@ -256,23 +257,25 @@ async def test_slash_command_rejects_unauthorized_user():
 
 
 @pytest.mark.asyncio
-async def test_reply_uses_followup_for_interaction():
+async def test_reply_acks_interaction_and_sends_result_as_plain_channel_message():
     platform = DiscordPlatform(token="t")
     interaction = _fake_interaction(user_id=2)
 
     await platform.reply(interaction, "hi there")
 
-    interaction.followup.send.assert_awaited_once_with("hi there")
+    interaction.followup.send.assert_awaited_once_with("Done.", ephemeral=True)
+    interaction.channel.send.assert_awaited_once_with("hi there")
 
 
 @pytest.mark.asyncio
-async def test_send_uses_followup_for_interaction():
+async def test_send_acks_interaction_and_sends_result_as_plain_channel_message():
     platform = DiscordPlatform(token="t")
     interaction = _fake_interaction(user_id=2)
 
     await platform.send(interaction, "hi there")
 
-    interaction.followup.send.assert_awaited_once_with("hi there")
+    interaction.followup.send.assert_awaited_once_with("Done.", ephemeral=True)
+    interaction.channel.send.assert_awaited_once_with("hi there")
 
 
 # --- typing indicator ------------------------------------------------------------

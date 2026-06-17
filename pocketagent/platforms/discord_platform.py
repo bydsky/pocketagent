@@ -139,7 +139,7 @@ class DiscordPlatform(Platform):
             await interaction.response.send_message("You're not authorized to use this bot.", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
 
         channel_name = getattr(interaction.channel, "name", "") or ""
         msg = Message(
@@ -206,8 +206,7 @@ class DiscordPlatform(Platform):
 
     async def reply(self, reply_ctx, content: str) -> None:
         if isinstance(reply_ctx, discord.Interaction):
-            for chunk in split_message(content, MAX_DISCORD_LEN):
-                await reply_ctx.followup.send(chunk)
+            await self._send_interaction_result(reply_ctx, content)
             return
         message: discord.Message = reply_ctx
         for chunk in split_message(content, MAX_DISCORD_LEN):
@@ -215,12 +214,19 @@ class DiscordPlatform(Platform):
 
     async def send(self, reply_ctx, content: str) -> None:
         if isinstance(reply_ctx, discord.Interaction):
-            for chunk in split_message(content, MAX_DISCORD_LEN):
-                await reply_ctx.followup.send(chunk)
+            await self._send_interaction_result(reply_ctx, content)
             return
         message: discord.Message = reply_ctx
         for chunk in split_message(content, MAX_DISCORD_LEN):
             await message.channel.send(chunk)
+
+    async def _send_interaction_result(self, interaction: discord.Interaction, content: str) -> None:
+        # Close out the deferred interaction with an ack only the invoker sees,
+        # then post the real result as a standalone channel message -- so it
+        # doesn't render nested under the "username used /command" header.
+        await interaction.followup.send("Done.", ephemeral=True)
+        for chunk in split_message(content, MAX_DISCORD_LEN):
+            await interaction.channel.send(chunk)
 
     def typing(self, reply_ctx):
         channel = getattr(reply_ctx, "channel", None)
