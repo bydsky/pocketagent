@@ -115,7 +115,7 @@ def build_agents(agent_options: dict[str, dict[str, Any]]) -> dict[str, Agent]:
     return agents
 
 
-def build_discord_platform(cfg: PlatformConfig) -> Platform:
+def build_discord_platform(cfg: PlatformConfig, commands: CommandRegistry) -> Platform:
     from .platforms.discord_platform import DiscordPlatform
 
     return DiscordPlatform(
@@ -124,10 +124,11 @@ def build_discord_platform(cfg: PlatformConfig) -> Platform:
         require_mention=cfg.options.get("require_mention", True),
         group_reply_all_guilds=cfg.options.get("group_reply_all_guilds", ""),
         require_mention_channels=cfg.options.get("require_mention_channels", ""),
+        commands=commands,
     )
 
 
-PLATFORM_FACTORIES: dict[str, Callable[[PlatformConfig], Platform]] = {
+PLATFORM_FACTORIES: dict[str, Callable[[PlatformConfig, CommandRegistry], Platform]] = {
     "discord": build_discord_platform,
 }
 
@@ -143,7 +144,7 @@ def build_app(config: AppConfig) -> tuple[dict[str, Platform], Engine]:
         factory = PLATFORM_FACTORIES.get(name)
         if factory is None:
             raise ValueError(f"platforms.{name}: unknown platform type '{name}'")
-        platforms[name] = factory(platform_cfg)
+        platforms[name] = factory(platform_cfg, config.commands)
 
         workspace = WorkspaceManager(platform_cfg.base_dir)
         routers[name] = Router(

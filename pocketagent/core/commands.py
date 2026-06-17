@@ -97,6 +97,9 @@ class CommandRegistry:
     def names(self) -> list[str]:
         return list(self._commands.keys())
 
+    def all(self) -> list[CustomCommand]:
+        return list(self._commands.values())
+
     def expand(self, content: str) -> tuple[CustomCommand, str] | None:
         """If content is a known command, return (command, expanded_prompt_or_exec).
 

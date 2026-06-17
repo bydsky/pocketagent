@@ -1,5 +1,10 @@
-import pytest
+from unittest.mock import AsyncMock, Mock
 
+import discord
+import pytest
+from discord import app_commands
+
+from pocketagent.core.commands import CommandRegistry, CustomCommand
 from pocketagent.core.platform import csv_contains
 from pocketagent.platforms.discord_platform import DiscordPlatform
 
@@ -169,3 +174,102 @@ async def test_group_reply_all_guilds_star_matches_all_guilds():
         _FakeMessage("hello", author, channel, guild=_FakeGuild(id=2), mentions=[])
     )
     assert len(received) == 2
+
+
+# --- Slash commands -------------------------------------------------------------
+
+
+def _fake_interaction(user_id: int, channel_id: int = 10, channel_name: str = "general"):
+    interaction = Mock(spec=discord.Interaction)
+    interaction.user = _FakeUser(id=user_id)
+    interaction.channel_id = channel_id
+    interaction.channel = _FakeChannel(id=channel_id, name=channel_name)
+    interaction.response = Mock()
+    interaction.response.defer = AsyncMock()
+    interaction.response.send_message = AsyncMock()
+    interaction.followup = Mock()
+    interaction.followup.send = AsyncMock()
+    return interaction
+
+
+def test_register_slash_commands_adds_one_per_custom_command():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="english", prompt="Translate: {{1*}}", description="Translate text"))
+    registry.add(CustomCommand(name="clear", prompt="/clear"))  # no description configured
+    platform = DiscordPlatform(token="t", commands=registry)
+
+    tree = app_commands.CommandTree(discord.Client(intents=discord.Intents.default()))
+    platform._register_slash_commands(tree)
+
+    registered = {c.name: c.description for c in tree.get_commands()}
+    assert registered == {"english": "Translate text", "clear": "clear"}
+
+
+def test_register_slash_commands_noop_without_commands():
+    platform = DiscordPlatform(token="t")
+    tree = app_commands.CommandTree(discord.Client(intents=discord.Intents.default()))
+    platform._register_slash_commands(tree)
+    assert tree.get_commands() == []
+
+
+@pytest.mark.asyncio
+async def test_slash_command_dispatches_through_handler():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="english", prompt="Translate: {{1*}}"))
+    platform = DiscordPlatform(token="t", commands=registry)
+    received = []
+
+    async def handler(plat, msg):
+        received.append(msg)
+
+    platform._handler = handler
+    interaction = _fake_interaction(user_id=2, channel_id=10)
+
+    await platform._on_slash_command(interaction, "english", "hola mundo")
+
+    interaction.response.defer.assert_awaited_once()
+    assert len(received) == 1
+    msg = received[0]
+    assert msg.content == "/english hola mundo"
+    assert msg.session_key == "discord:10:2"
+    assert msg.reply_ctx is interaction
+
+
+@pytest.mark.asyncio
+async def test_slash_command_rejects_unauthorized_user():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="english", prompt="Translate: {{1*}}"))
+    platform = DiscordPlatform(token="t", allow_from="999", commands=registry)
+    received = []
+
+    async def handler(plat, msg):
+        received.append(msg)
+
+    platform._handler = handler
+    interaction = _fake_interaction(user_id=2)
+
+    await platform._on_slash_command(interaction, "english", "hola")
+
+    interaction.response.send_message.assert_awaited_once()
+    interaction.response.defer.assert_not_awaited()
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_reply_uses_followup_for_interaction():
+    platform = DiscordPlatform(token="t")
+    interaction = _fake_interaction(user_id=2)
+
+    await platform.reply(interaction, "hi there")
+
+    interaction.followup.send.assert_awaited_once_with("hi there")
+
+
+@pytest.mark.asyncio
+async def test_send_uses_followup_for_interaction():
+    platform = DiscordPlatform(token="t")
+    interaction = _fake_interaction(user_id=2)
+
+    await platform.send(interaction, "hi there")
+
+    interaction.followup.send.assert_awaited_once_with("hi there")

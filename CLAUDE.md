@@ -108,4 +108,11 @@ so two dirs sharing a basename never collide.
 
 DMs are always dispatched; guild channel messages only dispatch when the bot is
 `@`-mentioned (the mention is stripped before handing the message to the engine). No
-threads/buttons/slash-commands yet — plain text messaging only.
+threads/buttons yet — plain text messaging only.
+
+Configured custom commands are also registered as real Discord slash commands (via
+`discord.app_commands.CommandTree`), each with a single free-text `args` option.
+Invoking one reconstructs the equivalent `/name args...` text and feeds it through the
+same `CommandRegistry.expand()` path used for typed text commands, so behavior is
+identical either way. Slash-command interactions skip the `@`-mention gating entirely
+(invoking one is already an explicit action) but still go through `allow_list`.
