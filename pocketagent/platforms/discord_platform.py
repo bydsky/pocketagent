@@ -2,10 +2,11 @@
 
 DMs are always dispatched; guild channel messages only dispatch when the
 bot is @mentioned (the mention is stripped before handing the message to
-the engine). group_reply_all_guilds lifts the mention requirement for
-specific guilds (or "*" for all); require_mention_channels re-imposes it
-for specific channels even inside those guilds. No threads/buttons yet --
-plain text messaging only.
+the engine), unless the guild is listed in group_reply_all_guilds (or
+group_reply_all_guilds is "*" for every guild), which lifts the mention
+requirement. require_mention_channels re-imposes it for specific channels
+even inside those guilds. No threads/buttons yet -- plain text messaging
+only.
 
 Configured custom commands (see core/commands.py) are additionally
 registered as real Discord slash commands, each with a single free-text
@@ -67,7 +68,6 @@ class DiscordPlatform(Platform):
         self,
         token: str,
         allow_from: str = "",
-        require_mention: bool = True,
         group_reply_all_guilds: str = "",
         require_mention_channels: str = "",
         commands: CommandRegistry | None = None,
@@ -76,7 +76,6 @@ class DiscordPlatform(Platform):
             raise ValueError("discord: token is required")
         self.token = token
         self.allow_from = allow_from
-        self.require_mention = require_mention
         self.group_reply_all_guilds = group_reply_all_guilds
         self.require_mention_channels = require_mention_channels
         self.commands = commands
@@ -169,9 +168,7 @@ class DiscordPlatform(Platform):
         content = message.content
         is_guild = message.guild is not None
         if is_guild:
-            needs_mention = self.require_mention
-            if csv_contains(self.group_reply_all_guilds, str(message.guild.id)):
-                needs_mention = False
+            needs_mention = not csv_contains(self.group_reply_all_guilds, str(message.guild.id))
             if csv_contains(self.require_mention_channels, str(message.channel.id)):
                 needs_mention = True
 
