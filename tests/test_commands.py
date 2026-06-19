@@ -112,3 +112,47 @@ def test_registry_expand_non_command_returns_none():
     registry = CommandRegistry()
     registry.add(CustomCommand(name="deploy", prompt="x"))
     assert registry.expand("just chatting") is None
+
+
+def test_custom_command_allows_empty_exec_as_passthrough():
+    # exec="" is a deliberate value (e.g. /shell with no fixed prefix), not
+    # the same as exec unset -- must not raise.
+    CustomCommand(name="shell", exec="")
+
+
+def test_registry_expand_empty_exec_passes_through_full_args():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="shell", exec=""))
+    result = registry.expand("/shell ls -la")
+    assert result is not None
+    _, expanded = result
+    assert expanded == "ls -la"
+
+
+def test_registry_expand_empty_exec_with_no_args():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="shell", exec=""))
+    result = registry.expand("/shell")
+    assert result is not None
+    _, expanded = result
+    assert expanded == ""
+
+
+def test_registry_expand_empty_exec_preserves_quoting_verbatim():
+    # exec="" must NOT round-trip through shlex.split()/' '.join(), which
+    # would silently flatten a quoted multi-word argument into bare words.
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="shell", exec=""))
+    result = registry.expand('/shell grep "foo bar" file.txt')
+    assert result is not None
+    _, expanded = result
+    assert expanded == 'grep "foo bar" file.txt'
+
+
+def test_registry_expand_empty_exec_collapses_only_boundary_whitespace():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="shell", exec=""))
+    result = registry.expand("/shell   ls   -la  ")
+    assert result is not None
+    _, expanded = result
+    assert expanded == "ls   -la"

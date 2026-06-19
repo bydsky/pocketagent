@@ -108,3 +108,12 @@ prompt = "Deploy {{1}} to the {{2:staging}} environment and report status."
 # with the raw output instead of going through the agent.
 [commands.status]
 exec = "git status"
+
+# exec = "" (note: empty string, not unset) is a deliberate passthrough --
+# the user's full typed text becomes the entire shell command instead of
+# being appended to a fixed prefix. "/shell ls -la" runs "ls -la" in the
+# channel's workspace folder. Anyone who can message this bot can now run
+# arbitrary shell commands as the bot's user -- only enable this where your
+# allow_from/allow list is trusted.
+[commands.shell]
+exec = ""
