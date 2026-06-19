@@ -53,3 +53,26 @@ def test_resolve_keeps_binding_even_if_channel_renamed(tmp_path):
     first = router.resolve("111", "old-name")
     second = router.resolve("111", "new-name")
     assert first.work_dir == second.work_dir
+
+
+def test_resolve_show_footer_defaults_false(tmp_path):
+    router = make_router(tmp_path)
+    assert router.resolve("111", "general").show_footer is False
+
+
+def test_resolve_show_footer_platform_default_true(tmp_path):
+    workspace = WorkspaceManager(tmp_path / "base")
+    router = Router(default_agent="claude_code", workspace=workspace, show_footer=True)
+    assert router.resolve("111", "general").show_footer is True
+
+
+def test_resolve_show_footer_channel_override_wins(tmp_path):
+    workspace = WorkspaceManager(tmp_path / "base")
+    router = Router(
+        default_agent="claude_code",
+        workspace=workspace,
+        channels={"111": ChannelOverride(show_footer=True)},
+        show_footer=False,
+    )
+    assert router.resolve("111", "general").show_footer is True
+    assert router.resolve("222", "general").show_footer is False

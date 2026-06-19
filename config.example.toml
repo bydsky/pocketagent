@@ -15,6 +15,9 @@ allow_from = ""              # comma-separated user IDs; empty = allow everyone
                                     # @mention, even inside a group_reply_all_guilds guild
 default_agent = "claude_code"
 base_dir = "~/pocketagent-workspaces/discord"
+# show_footer = false          # append a "model · tokens · ctx% · 5h% · 7d% · $cost"
+                                # footer to replies (claude_code only; off by default);
+                                # overridable per channel below
 # Applied to every channel on this platform, combined with the handling
 # agent's own agent_system_prompt below (claude_code: both joined and sent
 # via --append-system-prompt; tmux: ignored, with a warning logged).
@@ -36,6 +39,7 @@ platform_system_prompt = """
 [platforms.discord.channels."123456789012345678"]
 agent = "claude_code"
 workspace = "support-bot"    # fixed folder name instead of the channel's own name
+# show_footer = true         # turn on the footer just for this channel
 
 [platforms.telegram]
 token = "PUT_YOUR_TELEGRAM_BOT_TOKEN_HERE"

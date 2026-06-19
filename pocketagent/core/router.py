@@ -6,7 +6,9 @@ override fall back to the default agent and a workspace folder derived from
 the channel's display name. A platform may also configure one
 platform_system_prompt, applied to every channel on that platform regardless
 of which agent handles it (combined with that agent's own agent_system_prompt,
-if any -- see core/agent.py).
+if any -- see core/agent.py), and one show_footer default (whether replies get
+the model/usage footer -- see core/engine.py; off by default), both
+overridable per channel.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from .workspace import WorkspaceManager
 class ChannelOverride:
     agent: str | None = None
     workspace: str | None = None
+    show_footer: bool | None = None
 
 
 @dataclass
@@ -28,6 +31,7 @@ class ResolvedRoute:
     agent_name: str
     work_dir: Path
     platform_system_prompt: str = ""
+    show_footer: bool = False
 
 
 class Router:
@@ -37,11 +41,13 @@ class Router:
         workspace: WorkspaceManager,
         channels: dict[str, ChannelOverride] | None = None,
         platform_system_prompt: str = "",
+        show_footer: bool = False,
     ) -> None:
         self.default_agent = default_agent
         self.workspace = workspace
         self.channels = channels or {}
         self.platform_system_prompt = platform_system_prompt
+        self.show_footer = show_footer
 
     def resolve(self, channel_id: str, channel_name: str = "") -> ResolvedRoute:
         override = self.channels.get(channel_id)
@@ -50,6 +56,12 @@ class Router:
             override.workspace if override else None
         ) or channel_name or channel_id
         work_dir = self.workspace.resolve_dir(channel_id, preferred_workspace_name)
+        show_footer = (
+            override.show_footer if override and override.show_footer is not None else self.show_footer
+        )
         return ResolvedRoute(
-            agent_name=agent_name, work_dir=work_dir, platform_system_prompt=self.platform_system_prompt
+            agent_name=agent_name,
+            work_dir=work_dir,
+            platform_system_prompt=self.platform_system_prompt,
+            show_footer=show_footer,
         )

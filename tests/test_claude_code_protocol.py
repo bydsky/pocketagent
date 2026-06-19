@@ -9,6 +9,9 @@ from pocketagent.agents.claude_code import (
     ClaudeCodeAgent,
     ClaudeCodeSession,
     _build_user_message,
+    _compute_context_used_pct,
+    _format_model_name,
+    _parse_usage_text,
     _save_files,
     translate_message,
 )
@@ -88,6 +91,7 @@ def test_translate_result_success():
         "result": "All done",
         "session_id": "s1",
         "usage": {"input_tokens": 10, "output_tokens": 4},
+        "total_cost_usd": 0.0533424,
     }
     events = translate_message(msg)
     assert len(events) == 1
@@ -97,6 +101,7 @@ def test_translate_result_success():
     assert ev.content == "All done"
     assert ev.input_tokens == 10
     assert ev.output_tokens == 4
+    assert ev.cost_usd == 0.0533424
 
 
 def test_translate_result_error():
@@ -109,6 +114,51 @@ def test_translate_result_error():
 
 def test_translate_unknown_type_returns_empty():
     assert translate_message({"type": "something_else"}) == []
+
+
+def test_compute_context_used_pct_matches_real_statusline_payload():
+    # Real values from a captured statusLine hook payload: 3 + 71048 + 12454 = 83505
+    # input-side tokens over a 600000 context window -> CLI reported used_percentage 14.
+    msg = {
+        "usage": {
+            "input_tokens": 3,
+            "cache_creation_input_tokens": 71048,
+            "cache_read_input_tokens": 12454,
+        },
+        "modelUsage": {"claude-sonnet-4-6": {"contextWindow": 600000}},
+    }
+    assert _compute_context_used_pct(msg, "claude-sonnet-4-6") == 14
+
+
+def test_compute_context_used_pct_returns_none_without_model_usage():
+    assert _compute_context_used_pct({"usage": {"input_tokens": 1}}, "claude-sonnet-4-6") is None
+
+
+def test_parse_usage_text_extracts_both_percentages():
+    text = (
+        "You are currently using your subscription to power your Claude Code usage\n\n"
+        "Current session: 40% used · resets Jun 19, 2:29pm (Australia/Sydney)\n"
+        "Current week (all models): 17% used · resets Jun 23, 5:59pm (Australia/Sydney)\n"
+    )
+    assert _parse_usage_text(text) == (40, 17)
+
+
+def test_parse_usage_text_returns_none_when_unrecognized():
+    assert _parse_usage_text("not a usage report") == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        ("claude-sonnet-4-6", "Sonnet 4.6"),
+        ("claude-opus-4-8", "Opus 4.8"),
+        ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+        ("gpt-5-codex", "gpt-5-codex"),
+        ("", ""),
+    ],
+)
+def test_format_model_name(model_id, expected):
+    assert _format_model_name(model_id) == expected
 
 
 # --- _build_user_message / _save_files --------------------------------------
@@ -160,12 +210,29 @@ import sys, json
 sys.stdin.readline()
 lines = [
     {"type": "system", "subtype": "init", "session_id": "sess-1"},
-    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello!"}]}, "session_id": "sess-1"},
+    {"type": "assistant", "message": {"model": "claude-sonnet-4-6", "content": [{"type": "text", "text": "Hello!"}]}, "session_id": "sess-1"},
+    {"type": "result", "subtype": "success", "result": "Hello!", "session_id": "sess-1",
+     "usage": {"input_tokens": 5, "output_tokens": 2, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 50},
+     "total_cost_usd": 0.01,
+     "modelUsage": {"claude-sonnet-4-6": {"contextWindow": 1000}}},
+]
+for line in lines:
+    print(json.dumps(line), flush=True)
+"""
+
+FAKE_CLAUDE_WITH_USAGE = """
+import sys, json
+sys.stdin.readline()
+lines = [
+    {"type": "assistant", "message": {"model": "claude-sonnet-4-6", "content": [{"type": "text", "text": "Hello!"}]}, "session_id": "sess-1"},
     {"type": "result", "subtype": "success", "result": "Hello!", "session_id": "sess-1",
      "usage": {"input_tokens": 5, "output_tokens": 2}},
 ]
 for line in lines:
     print(json.dumps(line), flush=True)
+sys.stdin.readline()  # the /usage turn
+print(json.dumps({"type": "result", "subtype": "success",
+                   "result": "Current session: 40% used\\nCurrent week (all models): 17% used"}), flush=True)
 """
 
 FAKE_CLAUDE_PERMISSION = """
@@ -209,7 +276,26 @@ async def test_session_basic_turn(tmp_path):
         assert len(result_events) == 1
         assert result_events[0].type == EventType.RESULT
         assert result_events[0].input_tokens == 5
+        assert result_events[0].model == "Sonnet 4.6"
+        assert result_events[0].cost_usd == 0.01
+        assert result_events[0].context_used_pct == 16
         assert session.current_session_id == "sess-1"
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_session_fetches_rate_limits_via_usage_command(tmp_path):
+    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_WITH_USAGE)
+    session = ClaudeCodeSession(process, str(tmp_path))
+    try:
+        await session.send("hi")
+        events = []
+        async for ev in session.events():
+            events.append(ev)
+        result_events = [e for e in events if e.done]
+        assert result_events[0].rate_limit_5h_pct == 40
+        assert result_events[0].rate_limit_7d_pct == 17
     finally:
         await session.close()
 

@@ -49,7 +49,9 @@ def load_config(path: str | Path) -> AppConfig:
             raise ValueError(f"platforms.{name}: default_agent is required")
         channels = {
             str(channel_id): ChannelOverride(
-                agent=channel_cfg.get("agent"), workspace=channel_cfg.get("workspace")
+                agent=channel_cfg.get("agent"),
+                workspace=channel_cfg.get("workspace"),
+                show_footer=channel_cfg.get("show_footer"),
             )
             for channel_id, channel_cfg in raw.get("channels", {}).items()
         }
@@ -176,6 +178,7 @@ def build_app(config: AppConfig) -> tuple[dict[str, Platform], Engine]:
             workspace=workspace,
             channels=platform_cfg.channels,
             platform_system_prompt=platform_cfg.options.get("platform_system_prompt", ""),
+            show_footer=platform_cfg.options.get("show_footer", False),
         )
 
     session_store = SessionStore(Path(config.state_dir) / "sessions.json")

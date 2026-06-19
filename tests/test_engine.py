@@ -73,10 +73,17 @@ class _FakePlatform(Platform):
         return _Typing()
 
 
-def _make_engine(tmp_path, platform_system_prompt: str = "") -> tuple[Engine, _FakeAgent]:
+def _make_engine(
+    tmp_path, platform_system_prompt: str = "", show_footer: bool = True
+) -> tuple[Engine, _FakeAgent]:
     agent = _FakeAgent()
     workspace = WorkspaceManager(tmp_path / "workspace")
-    router = Router(default_agent="fake", workspace=workspace, platform_system_prompt=platform_system_prompt)
+    router = Router(
+        default_agent="fake",
+        workspace=workspace,
+        platform_system_prompt=platform_system_prompt,
+        show_footer=show_footer,
+    )
     session_store = SessionStore(tmp_path / "sessions.json")
     engine = Engine(
         agents={"fake": agent},
@@ -137,3 +144,35 @@ async def test_on_message_passes_platform_system_prompt_to_agent(tmp_path):
     await engine.on_message(platform, _make_message())
 
     assert agent.last_platform_system_prompt == "You are operating via chat."
+
+
+@pytest.mark.asyncio
+async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
+    class _AgentSessionWithUsage(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content="ok",
+                done=True,
+                input_tokens=10,
+                output_tokens=4,
+                model="claude-sonnet-4-6",
+                cost_usd=0.0533424,
+                context_used_pct=14,
+                rate_limit_5h_pct=40,
+                rate_limit_7d_pct=17,
+            )
+
+    class _AgentWithUsage(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="") -> AgentSession:
+            return _AgentSessionWithUsage()
+
+    engine, _ = _make_engine(tmp_path)
+    engine.agents["fake"] = _AgentWithUsage()
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    # event.model is already display-formatted by the agent backend that set it
+    # (here, a raw test value) -- the engine just passes it through unchanged.
+    assert platform.replies == ["ok\n\n· claude-sonnet-4-6 · 14 tokens · ctx:14% · 5h:40% · 7d:17% · $0.0533"]

@@ -10,9 +10,38 @@ from .commands import CommandRegistry
 from .platform import Platform
 from .router import Router
 from .session_store import SessionStore
-from .types import EventType, Message
+from .types import Event, EventType, Message
 
 logger = logging.getLogger(__name__)
+
+
+def _format_footer(event: Event) -> str:
+    """Build a "· model · N tokens · ctx:%  5h:%  7d:%  $cost" footer from whatever
+    the agent reported.
+
+    event.model is already display-formatted by whichever agent backend set it
+    (see claude_code._format_model_name) -- the engine stays agent-agnostic and
+    just passes it through. Only claude_code's RESULT event currently carries
+    model/cost_usd/context_used_pct/rate_limit_*_pct (see its module docstring);
+    codex's RESULT event has none of these, so it just gets a token count, and a
+    fully empty event (e.g. in tests) gets no footer at all.
+    """
+
+    parts = []
+    if event.model:
+        parts.append(event.model)
+    total_tokens = event.input_tokens + event.output_tokens
+    if total_tokens:
+        parts.append(f"{total_tokens} tokens")
+    if event.context_used_pct is not None:
+        parts.append(f"ctx:{event.context_used_pct}%")
+    if event.rate_limit_5h_pct is not None:
+        parts.append(f"5h:{event.rate_limit_5h_pct}%")
+    if event.rate_limit_7d_pct is not None:
+        parts.append(f"7d:{event.rate_limit_7d_pct}%")
+    if event.cost_usd is not None:
+        parts.append(f"${event.cost_usd:.4f}")
+    return f"· {' · '.join(parts)}" if parts else ""
 
 
 class Engine:
@@ -79,6 +108,9 @@ class Engine:
                         await platform.reply(msg.reply_ctx, f"Error: {error_text}")
                         return
                     final_text = "".join(text_parts) or event.content
+                    footer = _format_footer(event) if route.show_footer else ""
+                    if footer:
+                        final_text = f"{final_text}\n\n{footer}" if final_text else footer
                     if final_text:
                         await platform.reply(msg.reply_ctx, final_text)
                     return

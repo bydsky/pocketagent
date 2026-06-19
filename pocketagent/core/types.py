@@ -62,3 +62,8 @@ class Event:
     error: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    model: str = ""
+    cost_usd: float | None = None
+    context_used_pct: int | None = None
+    rate_limit_5h_pct: int | None = None
+    rate_limit_7d_pct: int | None = None
