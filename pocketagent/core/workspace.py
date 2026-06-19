@@ -49,10 +49,12 @@ class WorkspaceManager:
     def resolve_dir(self, channel_key: str, preferred_name: str | None = None) -> Path:
         """Return the (created) workspace directory for channel_key.
 
-        If channel_key was already bound, reuse that folder regardless of
-        preferred_name. Otherwise bind to a sanitized version of
-        preferred_name (or channel_key itself if no name is available),
-        disambiguating on collision.
+        If channel_key was already bound, reuse that binding regardless of
+        preferred_name. Otherwise, if preferred_name is (or expands to) an
+        absolute path -- e.g. a channel override of "~/workspace/pocketagent"
+        -- bind directly to that existing directory instead of a folder under
+        base_dir. Plain names are sanitized into a folder under base_dir,
+        disambiguating on collision, as before.
         """
 
         with self._lock:
@@ -60,15 +62,21 @@ class WorkspaceManager:
             if existing:
                 folder_name = existing
             else:
-                folder_name = self._allocate_folder_name(
-                    preferred_name or channel_key
-                )
+                folder_name = self._resolve_folder_name(preferred_name or channel_key)
                 self._bindings[channel_key] = folder_name
                 self._save()
 
-        path = self.base_dir / folder_name
+        path = Path(folder_name)
+        if not path.is_absolute():
+            path = self.base_dir / folder_name
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def _resolve_folder_name(self, preferred_name: str) -> str:
+        expanded = Path(preferred_name).expanduser()
+        if expanded.is_absolute():
+            return str(expanded)
+        return self._allocate_folder_name(preferred_name)
 
     def _allocate_folder_name(self, preferred_name: str) -> str:
         base = sanitize_folder_name(preferred_name)
