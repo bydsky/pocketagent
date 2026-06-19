@@ -1,10 +1,11 @@
 [project]
 name = "pocketagent"
 version = "0.1.0"
-description = "Bridge connecting chat platforms (Discord, Slack, Telegram) to AI coding agents (Claude Code, Gemini CLI, tmux)"
+description = "Bridge connecting chat platforms (Discord, Telegram, Slack planned) to AI coding agents (Claude Code, Codex, tmux, Gemini CLI planned)"
 requires-python = ">=3.11"
 dependencies = [
     "discord.py>=2.4",
+    "python-telegram-bot>=21,<22",
 ]
 
 [project.optional-dependencies]

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .agents.claude_code import ClaudeCodeAgent
+from .agents.codex import CodexAgent
 from .agents.tmux import DEFAULT_PROMPT_PATTERN, TmuxAgent
 from .core.agent import Agent
 from .core.commands import CommandRegistry, CustomCommand
@@ -90,6 +91,15 @@ AGENT_FACTORIES: dict[str, AgentFactory] = {
         extra_args=opts.get("extra_args", []),
         agent_system_prompt=opts.get("agent_system_prompt", ""),
     ),
+    "codex": lambda opts: CodexAgent(
+        command=opts.get("command", "codex"),
+        model=opts.get("model", ""),
+        sandbox=opts.get("sandbox", "workspace-write"),
+        ask_for_approval=opts.get("ask_for_approval", "never"),
+        extra_args=opts.get("extra_args", []),
+        agent_system_prompt=opts.get("agent_system_prompt", ""),
+        skip_git_repo_check=opts.get("skip_git_repo_check", True),
+    ),
     "tmux": lambda opts: TmuxAgent(
         session=opts.get("session", ""),
         pane=opts.get("pane", "0"),
@@ -129,8 +139,21 @@ def build_discord_platform(cfg: PlatformConfig, commands: CommandRegistry) -> Pl
     )
 
 
+def build_telegram_platform(cfg: PlatformConfig, commands: CommandRegistry) -> Platform:
+    from .platforms.telegram_platform import TelegramPlatform
+
+    return TelegramPlatform(
+        token=cfg.options.get("token", ""),
+        allow_from=cfg.options.get("allow_from", ""),
+        group_reply_all_chats=cfg.options.get("group_reply_all_chats", ""),
+        require_mention_chats=cfg.options.get("require_mention_chats", ""),
+        commands=commands,
+    )
+
+
 PLATFORM_FACTORIES: dict[str, Callable[[PlatformConfig, CommandRegistry], Platform]] = {
     "discord": build_discord_platform,
+    "telegram": build_telegram_platform,
 }
 
 

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-pocketagent bridges chat platforms (Discord, with Slack/Telegram planned) to AI coding
-agent CLIs (Claude Code, with Gemini CLI/tmux planned), so a coding agent can be driven
-from a chat app. Each platform has a default agent plus optional per-channel-id overrides
+pocketagent bridges chat platforms (Discord, Telegram, with Slack planned) to AI coding
+agent CLIs (Claude Code, Codex, tmux, with Gemini CLI planned), so a coding agent can be
+driven from a chat app. Each platform has a default agent plus optional per-channel-id overrides
 (different agent and/or workspace per channel). Every channel gets its own workspace
 folder; folder bindings persist in `.pocketagent-bindings.json` so renaming a channel
 doesn't orphan its history. Conversation continuity survives restarts: the agent's own
@@ -48,11 +48,11 @@ Everything platform/agent-specific is hidden behind two ABCs in `pocketagent/cor
 - **`Platform`** (`core/platform.py`): `start(handler)`, `reply(reply_ctx, content)`,
   `send(reply_ctx, content)`, `stop()`, and `typing(reply_ctx)` (optional, default no-op
   async context manager). One implementation per chat platform lives in
-  `pocketagent/platforms/` (currently `discord_platform.py`).
+  `pocketagent/platforms/` (`discord_platform.py`, `telegram_platform.py`).
 - **`Agent`** / **`AgentSession`** (`core/agent.py`): `Agent.start_session(session_id,
   work_dir)` returns an `AgentSession` with `send(prompt, images, files)`,
   `events()` (async iterator of `Event`), `alive()`, `close()`. One implementation per
-  agent backend lives in `pocketagent/agents/` (`claude_code.py`, `tmux.py`).
+  agent backend lives in `pocketagent/agents/` (`claude_code.py`, `codex.py`, `tmux.py`).
 
 Adding a new platform or agent means adding one module implementing one of these
 interfaces — `core/engine.py` does not need to change.
@@ -66,8 +66,9 @@ Supporting pieces in `core/`:
   passed to `Agent.start_session`, where it's combined with that agent's own
   `agent_system_prompt` (a constructor-time option set per agent in config, e.g.
   `[agents.claude_code]`). The claude_code backend joins the two and forwards them via
-  `--append-system-prompt`; the tmux backend has no generic way to apply either to an
-  arbitrary terminal program and logs a warning instead.
+  `--append-system-prompt`; the codex backend joins them the same way but forwards them via
+  `-c developer_instructions=<toml-string>` (its closest equivalent); the tmux backend has
+  no generic way to apply either to an arbitrary terminal program and logs a warning instead.
 - **`workspace.py`** (`WorkspaceManager`): maps a channel to a sanitized, collision-free
   directory name under the platform's `base_dir`, persisting the mapping in
   `.pocketagent-bindings.json` so a later channel rename doesn't orphan the workspace.
@@ -101,6 +102,23 @@ it's unit-testable without spawning a real `claude` process (see
 auto-approved (no interactive allow/deny UI wired into chat yet); a `PERMISSION_REQUEST`
 event is still emitted so callers can observe it.
 
+### Codex agent backend (`agents/codex.py`)
+
+Unlike claude_code's persistent stdin/stdout process, `codex exec` is one-shot: each
+invocation runs a single turn to completion and exits, so this backend spawns a fresh
+`codex exec --json ...` subprocess per `send()` instead of holding one open for the life
+of the session. `--json` turns stdout into a JSON-Lines event stream
+(`thread.started`/`item.completed`/`turn.completed`/`turn.failed`/`error`); stderr (where
+human-readable progress goes) is drained and discarded so it can't fill its pipe and stall
+the process. The `thread_id` from `thread.started` is this backend's session id, fed back
+via `resume <thread_id>` on the next turn. `ask_for_approval` defaults to `"never"` since
+codex exec has no stdio permission-prompt protocol to answer approval requests the way
+Claude Code does. `translate_message()` mirrors claude_code's pure-function design (see
+`tests/test_codex_protocol.py`); only `agent_message`/`reasoning` items have a
+field-confirmed shape, so other item types (`command_execution`, `file_change`,
+`mcp_tool_call`, `web_search`) are surfaced as generic `TOOL_USE` events carrying the
+whole item as JSON.
+
 ### tmux agent backend (`agents/tmux.py`)
 
 Drives a persistent tmux pane as an interactive shell agent for CLIs that only offer a
@@ -125,3 +143,18 @@ Invoking one reconstructs the equivalent `/name args...` text and feeds it throu
 same `CommandRegistry.expand()` path used for typed text commands, so behavior is
 identical either way. Slash-command interactions skip the `@`-mention gating entirely
 (invoking one is already an explicit action) but still go through `allow_list`.
+
+### Telegram platform (`platforms/telegram_platform.py`)
+
+Built on `python-telegram-bot`, run inside the existing asyncio loop via the manual
+`Application.initialize()` / `.start()` / `updater.start_polling()` lifecycle rather than
+the blocking `run_polling()` convenience wrapper. Private chats are always dispatched;
+group/supergroup messages only dispatch when the bot's `@username` appears in the text
+(stripped before handing off), unless the chat id is listed in `group_reply_all_chats`
+(mirrors Discord's `group_reply_all_guilds`/`require_mention_channels`, renamed
+`require_mention_chats` here). Configured custom commands are registered with Telegram via
+`setMyCommands` purely for command-autocomplete in the client; unlike Discord, Telegram
+already delivers `/name args` as ordinary message text, so it flows through the same
+`CommandRegistry.expand()` path with no separate dispatch path needed. There's no native
+typing-indicator context manager in `python-telegram-bot`, so `typing()` builds one that
+calls `sendChatAction(typing)` on a loop (Telegram's indicator only lasts ~5s per call).

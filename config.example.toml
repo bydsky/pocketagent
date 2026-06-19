@@ -37,6 +37,22 @@ platform_system_prompt = """
 agent = "claude_code"
 workspace = "support-bot"    # fixed folder name instead of the channel's own name
 
+[platforms.telegram]
+token = "PUT_YOUR_TELEGRAM_BOT_TOKEN_HERE"
+allow_from = ""               # comma-separated user IDs; empty = allow everyone
+# @mention (e.g. "@my_bot") is required in group/supergroup chats by default
+# (private chats always work).
+# group_reply_all_chats = ""      # comma-separated chat IDs ("*" = all) that don't
+                                   # need @mention
+# require_mention_chats = ""      # comma-separated chat IDs that always need
+                                   # @mention, even inside a group_reply_all_chats chat
+default_agent = "codex"
+base_dir = "~/pocketagent-workspaces/telegram"
+
+[platforms.telegram.channels."-1001234567890"]
+agent = "claude_code"
+workspace = "support-bot"
+
 # --- Agents ------------------------------------------------------------------
 
 [agents.claude_code]
@@ -46,6 +62,22 @@ permission_mode = "default"  # default | acceptEdits | plan | bypassPermissions
 # agent_system_prompt = "You are deployed as a coding assistant; prefer small diffs."
                               # always-on system prompt for this agent, regardless of
                               # platform; combined with that platform's platform_system_prompt
+
+# Alternative agent backend: OpenAI's Codex CLI. Unlike claude_code, `codex
+# exec` is one-shot per turn (no persistent stdin/stdout process), and a
+# fresh subprocess is spawned for every message; conversation continuity
+# works the same way via the session id codex hands back (its "thread id").
+[agents.codex]
+command = "codex"            # path to the Codex CLI binary
+model = ""                   # optional model override, e.g. "gpt-5.4"
+sandbox = "workspace-write"  # read-only | workspace-write | danger-full-access
+ask_for_approval = "never"   # untrusted | on-request | never -- "never" avoids hanging,
+                              # since there's no interactive approval UI wired up here
+# skip_git_repo_check = true # allow running outside a git repository
+# agent_system_prompt = "You are deployed as a coding assistant; prefer small diffs."
+                              # sent via `-c developer_instructions=...` (codex has no
+                              # --append-system-prompt equivalent); combined with that
+                              # platform's platform_system_prompt
 
 # Alternative agent backend: drives a persistent tmux pane as an interactive
 # shell agent instead of speaking a structured protocol. Useful for CLIs
