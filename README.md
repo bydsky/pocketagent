@@ -28,8 +28,6 @@ cp config.example.toml pocketagent.toml
 pocketagent run -c pocketagent.toml
 ```
 
-Requires the `claude` CLI to be installed and authenticated.
-
 ### Discord bot setup
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and
@@ -46,6 +44,21 @@ Requires the `claude` CLI to be installed and authenticated.
 6. DM the bot directly, or `@mention` it in a server channel it's in (guild channels
    require a mention by default; see `group_reply_all_guilds` in
    `config.example.toml` to relax that).
+
+### Claude Code agent setup
+
+The default `claude_code` agent backend drives the `claude` CLI as a subprocess, so it
+must be installed and authenticated on the machine running pocketagent, separately from
+any pocketagent config:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude    # run once interactively to log in / authenticate
+```
+
+`[agents.claude_code].command` in `pocketagent.toml` defaults to `"claude"` (resolved
+via `PATH`); set it to a full path if the binary isn't on `PATH` for the user/service
+running pocketagent.
 
 ## Project layout
 
