@@ -30,6 +30,23 @@ pocketagent run -c pocketagent.toml
 
 Requires the `claude` CLI to be installed and authenticated.
 
+### Discord bot setup
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and
+   click **New Application**.
+2. Under **Bot**, click **Reset Token** to generate a bot token, and save it — this goes
+   in `[platforms.discord].token` in `pocketagent.toml`.
+3. On the same **Bot** page, enable the **Message Content Intent** under
+   "Privileged Gateway Intents" (required — pocketagent reads message text).
+4. Under **OAuth2 > URL Generator**, select the `bot` scope and the
+   `Send Messages` / `Read Message History` permissions, then open the
+   generated URL to invite the bot to your server.
+5. In `pocketagent.toml`, set `[platforms.discord].token` to the bot token from step 2,
+   and adjust `base_dir`/`default_agent`/`allow_from` as needed.
+6. DM the bot directly, or `@mention` it in a server channel it's in (guild channels
+   require a mention by default; see `group_reply_all_guilds` in
+   `config.example.toml` to relax that).
+
 ## Project layout
 
 ```
