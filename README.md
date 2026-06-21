@@ -1,7 +1,7 @@
 # pocketagent
 
-Connects AI coding agents (Claude Code CLI, with Gemini CLI / tmux planned)
-to chat platforms (Discord, with Slack / Telegram planned) so you can drive a
+Connects AI coding agents (Claude Code, Codex, tmux, with Gemini CLI planned)
+to chat platforms (Discord, Telegram, with Slack planned) so you can drive a
 coding agent from a chat app.
 
 ## How it works
@@ -36,8 +36,10 @@ Requires the `claude` CLI to be installed and authenticated.
 pocketagent/
   core/            platform-agnostic abstractions: Platform, Agent, Engine,
                    routing, workspaces, commands, session persistence
-  platforms/       one module per chat platform (discord_platform.py)
-  agents/          one module per agent backend (claude_code.py)
+  platforms/       one module per chat platform (discord_platform.py,
+                   telegram_platform.py)
+  agents/          one module per agent backend (claude_code.py, codex.py,
+                   tmux.py)
 ```
 
 Adding a new platform or agent means adding one new module implementing the
