@@ -5,12 +5,16 @@ from pathlib import Path
 
 import pytest
 
+from datetime import datetime, timezone
+
 from pocketagent.agents.claude_code import (
     ClaudeCodeAgent,
     ClaudeCodeSession,
     _build_user_message,
     _compute_context_used_pct,
+    _format_duration,
     _format_model_name,
+    _parse_reset_in,
     _parse_usage_text,
     _save_files,
     translate_message,
@@ -134,17 +138,53 @@ def test_compute_context_used_pct_returns_none_without_model_usage():
     assert _compute_context_used_pct({"usage": {"input_tokens": 1}}, "claude-sonnet-4-6") is None
 
 
-def test_parse_usage_text_extracts_both_percentages():
+def test_parse_usage_text_extracts_both_percentages_and_resets():
     text = (
         "You are currently using your subscription to power your Claude Code usage\n\n"
         "Current session: 40% used · resets Jun 19, 2:29pm (Australia/Sydney)\n"
         "Current week (all models): 17% used · resets Jun 23, 5:59pm (Australia/Sydney)\n"
     )
-    assert _parse_usage_text(text) == (40, 17)
+    # 2026-06-19 04:18 UTC == 2026-06-19 14:18 Sydney (UTC+10), 11 minutes before the
+    # 5h reset (Jun 19, 2:29pm) and just over 4 days before the 7d reset (Jun 23, 5:59pm).
+    now = datetime(2026, 6, 19, 4, 18, tzinfo=timezone.utc)
+    assert _parse_usage_text(text, now) == (40, "11m", 17, "4d")
 
 
 def test_parse_usage_text_returns_none_when_unrecognized():
-    assert _parse_usage_text("not a usage report") == (None, None)
+    assert _parse_usage_text("not a usage report") == (None, None, None, None)
+
+
+def test_parse_usage_text_omits_reset_when_clause_missing():
+    text = "Current session: 40% used\nCurrent week (all models): 17% used\n"
+    assert _parse_usage_text(text) == (40, None, 17, None)
+
+
+def test_parse_reset_in_handles_year_rollover():
+    # Dec 31 -> a reset stamped "Jan 2" with no year must roll to next year,
+    # not be treated as already-past.
+    now = datetime(2026, 12, 31, 12, 0, tzinfo=timezone.utc)
+    assert _parse_reset_in("Jan 2, 12:00pm", "UTC", now) == "2d"
+
+
+def test_parse_reset_in_returns_none_for_unknown_timezone():
+    now = datetime(2026, 6, 19, 4, 40, tzinfo=timezone.utc)
+    assert _parse_reset_in("Jun 19, 2:29pm", "Not/AZone", now) is None
+
+
+@pytest.mark.parametrize(
+    ("minutes", "expected"),
+    [
+        (5, "5m"),
+        (169, "2h49m"),
+        (120, "2h"),
+        (60 * 24 * 2, "2d"),
+        (60 * 24 * 2 + 60, "2d"),  # days drop any remaining hours, matching the footer's compact form
+    ],
+)
+def test_format_duration(minutes, expected):
+    from datetime import timedelta
+
+    assert _format_duration(timedelta(minutes=minutes)) == expected
 
 
 @pytest.mark.parametrize(
@@ -232,7 +272,8 @@ for line in lines:
     print(json.dumps(line), flush=True)
 sys.stdin.readline()  # the /usage turn
 print(json.dumps({"type": "result", "subtype": "success",
-                   "result": "Current session: 40% used\\nCurrent week (all models): 17% used"}), flush=True)
+                   "result": "Current session: 40% used · resets Dec 31, 11:59pm (UTC)\\n"
+                             "Current week (all models): 17% used · resets Dec 31, 11:58pm (UTC)"}), flush=True)
 """
 
 FAKE_CLAUDE_PERMISSION = """
@@ -296,6 +337,10 @@ async def test_session_fetches_rate_limits_via_usage_command(tmp_path):
         result_events = [e for e in events if e.done]
         assert result_events[0].rate_limit_5h_pct == 40
         assert result_events[0].rate_limit_7d_pct == 17
+        # exact countdown depends on real "now" vs. the fixture's fixed Dec 31
+        # reset stamps; just check each landed in the right unit.
+        assert result_events[0].rate_limit_5h_reset_in.endswith(("m", "h", "d"))
+        assert result_events[0].rate_limit_7d_reset_in.endswith(("m", "h", "d"))
     finally:
         await session.close()
 
@@ -314,6 +359,8 @@ async def test_session_skips_usage_turn_when_show_footer_is_false(tmp_path):
         # /usage turn (and its cost/transcript noise) must be skipped.
         assert result_events[0].rate_limit_5h_pct is None
         assert result_events[0].rate_limit_7d_pct is None
+        assert result_events[0].rate_limit_5h_reset_in is None
+        assert result_events[0].rate_limit_7d_reset_in is None
     finally:
         await session.close()
 

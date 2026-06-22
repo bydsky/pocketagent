@@ -163,8 +163,10 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
                 model="claude-sonnet-4-6",
                 cost_usd=0.0533424,
                 context_used_pct=14,
-                rate_limit_5h_pct=40,
-                rate_limit_7d_pct=17,
+                rate_limit_5h_pct=84,
+                rate_limit_5h_reset_in="2h49m",
+                rate_limit_7d_pct=14,
+                rate_limit_7d_reset_in="2d",
             )
 
     class _AgentWithUsage(_FakeAgent):
@@ -181,7 +183,9 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
 
     # event.model is already display-formatted by the agent backend that set it
     # (here, a raw test value) -- the engine just passes it through unchanged.
-    assert platform.replies == ["ok\n\n· claude-sonnet-4-6 · 14 tokens · ctx:14% · 5h:40% · 7d:17% · $0.0533"]
+    assert platform.replies == [
+        "ok\n\n· claude-sonnet-4-6 · 14 tokens · ctx:14% · 5h:84%(2h49m) · 7d:14%(2d) · $0.0533"
+    ]
 
 
 @pytest.mark.asyncio

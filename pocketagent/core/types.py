@@ -67,3 +67,5 @@ class Event:
     context_used_pct: int | None = None
     rate_limit_5h_pct: int | None = None
     rate_limit_7d_pct: int | None = None
+    rate_limit_5h_reset_in: str | None = None  # compact countdown, e.g. "2h49m"
+    rate_limit_7d_reset_in: str | None = None  # compact countdown, e.g. "2d"

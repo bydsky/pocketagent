@@ -62,7 +62,9 @@ import asyncio
 import base64
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Sequence
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..core.agent import Agent, AgentSession
 from ..core.attachments import save_files
@@ -186,26 +188,67 @@ def _format_model_name(model: str) -> str:
     return f"{family.capitalize()} {major}.{minor}"
 
 
-_USAGE_SESSION_RE = re.compile(r"Current session:\s*(\d+)%\s*used")
-_USAGE_WEEK_RE = re.compile(r"Current week \(all models\):\s*(\d+)%\s*used")
+_RESET_CLAUSE = r"(?:\s*·\s*resets ([A-Za-z]{3} \d{1,2}, \d{1,2}:\d{2}(?:am|pm)) \(([^)]+)\))?"
+_USAGE_SESSION_RE = re.compile(rf"Current session:\s*(\d+)%\s*used{_RESET_CLAUSE}")
+_USAGE_WEEK_RE = re.compile(rf"Current week \(all models\):\s*(\d+)%\s*used{_RESET_CLAUSE}")
 
 
-def _parse_usage_text(text: str) -> tuple[int | None, int | None]:
+def _format_duration(delta: timedelta) -> str:
+    """Compact countdown for a reply footer: "2h49m" under a day, else "2d"."""
+
+    total_minutes = max(0, round(delta.total_seconds() / 60))
+    days, rem = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(rem, 60)
+    if days:
+        return f"{days}d"
+    if hours:
+        return f"{hours}h{minutes}m" if minutes else f"{hours}h"
+    return f"{minutes}m"
+
+
+def _parse_reset_in(date_str: str | None, tz_name: str | None, now: datetime) -> str | None:
+    """Turn a "Jun 19, 2:29pm" + IANA tz name (as the CLI's `/usage` reply
+    reports resets) into a compact countdown relative to now, a tz-aware
+    reference instant. now is a parameter (rather than datetime.now() inline)
+    so tests can pin "the present" without mocking the clock.
+    """
+
+    if not date_str or not tz_name:
+        return None
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    naive = datetime.strptime(f"{date_str} 2000", "%b %d, %I:%M%p %Y")
+    now_local = now.astimezone(tz)
+    target = naive.replace(year=now_local.year, tzinfo=tz)
+    if target < now_local:
+        target = target.replace(year=now_local.year + 1)
+    return _format_duration(target - now_local)
+
+
+def _parse_usage_text(
+    text: str, now: datetime | None = None
+) -> tuple[int | None, str | None, int | None, str | None]:
     """Parse the plain-text reply from the CLI's own `/usage` slash command.
 
     `/usage` is handled entirely client-side (no model call: total_cost_usd is
     0 and the reported model is "<synthetic>") and is the only place rate-limit
-    percentages are obtainable in --print/stream-json mode -- they're not on
-    any JSON message field, and the interactive statusLine hook that normally
-    reports them never fires here (confirmed by configuring one and observing
-    it's never invoked under --print).
+    percentages (and their reset times) are obtainable in --print/stream-json
+    mode -- they're not on any JSON message field, and the interactive
+    statusLine hook that normally reports them never fires here (confirmed by
+    configuring one and observing it's never invoked under --print). Returns
+    (five_hour_pct, five_hour_reset_in, seven_day_pct, seven_day_reset_in).
     """
 
+    now = now or datetime.now(timezone.utc)
     five_hour = _USAGE_SESSION_RE.search(text)
     seven_day = _USAGE_WEEK_RE.search(text)
     return (
         int(five_hour.group(1)) if five_hour else None,
+        _parse_reset_in(five_hour.group(2), five_hour.group(3), now) if five_hour else None,
         int(seven_day.group(1)) if seven_day else None,
+        _parse_reset_in(seven_day.group(2), seven_day.group(3), now) if seven_day else None,
     )
 
 
@@ -307,9 +350,12 @@ class ClaudeCodeSession(AgentSession):
                         event.model = _format_model_name(self._model)
                         event.context_used_pct = _compute_context_used_pct(msg, self._model)
                         if self._show_footer:
-                            event.rate_limit_5h_pct, event.rate_limit_7d_pct = (
-                                await self._fetch_rate_limits()
-                            )
+                            (
+                                event.rate_limit_5h_pct,
+                                event.rate_limit_5h_reset_in,
+                                event.rate_limit_7d_pct,
+                                event.rate_limit_7d_reset_in,
+                            ) = await self._fetch_rate_limits()
                     await self._queue.put(event)
         except asyncio.CancelledError:
             pass
@@ -319,7 +365,7 @@ class ClaudeCodeSession(AgentSession):
                     Event(type=EventType.ERROR, error="agent process ended unexpectedly", done=True)
                 )
 
-    async def _fetch_rate_limits(self) -> tuple[int | None, int | None]:
+    async def _fetch_rate_limits(self) -> tuple[int | None, str | None, int | None, str | None]:
         """Send `/usage` as its own turn and parse its plain-text reply.
 
         This is a real conversation turn, not a side channel -- it adds a
@@ -329,24 +375,24 @@ class ClaudeCodeSession(AgentSession):
         rate-limit percentages out of --print/stream-json mode.
         """
         if self._process.stdin is None:
-            return None, None
+            return None, None, None, None
         line = json.dumps({"type": "user", "message": {"role": "user", "content": "/usage"}}) + "\n"
         try:
             self._process.stdin.write(line.encode("utf-8"))
             await self._process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError):
-            return None, None
+            return None, None, None, None
         try:
             return await asyncio.wait_for(self._read_usage_result(), timeout=15)
         except asyncio.TimeoutError:
-            return None, None
+            return None, None, None, None
 
-    async def _read_usage_result(self) -> tuple[int | None, int | None]:
+    async def _read_usage_result(self) -> tuple[int | None, str | None, int | None, str | None]:
         assert self._process.stdout is not None
         while True:
             raw = await self._process.stdout.readline()
             if not raw:
-                return None, None
+                return None, None, None, None
             line = raw.decode("utf-8", errors="replace").strip()
             if not line:
                 continue

@@ -36,9 +36,11 @@ def _format_footer(event: Event) -> str:
     if event.context_used_pct is not None:
         parts.append(f"ctx:{event.context_used_pct}%")
     if event.rate_limit_5h_pct is not None:
-        parts.append(f"5h:{event.rate_limit_5h_pct}%")
+        reset = f"({event.rate_limit_5h_reset_in})" if event.rate_limit_5h_reset_in else ""
+        parts.append(f"5h:{event.rate_limit_5h_pct}%{reset}")
     if event.rate_limit_7d_pct is not None:
-        parts.append(f"7d:{event.rate_limit_7d_pct}%")
+        reset = f"({event.rate_limit_7d_reset_in})" if event.rate_limit_7d_reset_in else ""
+        parts.append(f"7d:{event.rate_limit_7d_pct}%{reset}")
     if event.cost_usd is not None:
         parts.append(f"${event.cost_usd:.4f}")
     return f"· {' · '.join(parts)}" if parts else ""
