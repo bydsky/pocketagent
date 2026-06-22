@@ -1,3 +1,4 @@
+import asyncio
 from typing import AsyncIterator
 
 import pytest
@@ -176,3 +177,53 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
     # event.model is already display-formatted by the agent backend that set it
     # (here, a raw test value) -- the engine just passes it through unchanged.
     assert platform.replies == ["ok\n\n· claude-sonnet-4-6 · 14 tokens · ctx:14% · 5h:40% · 7d:17% · $0.0533"]
+
+
+@pytest.mark.asyncio
+async def test_on_message_queues_second_message_while_first_is_in_flight(tmp_path):
+    """A second message for the same session_key must wait for the first turn
+    to finish (and the same AgentSession instance) instead of racing it --
+    concurrent sends to one session would corrupt a stream-protocol agent."""
+
+    gate = asyncio.Event()
+    order: list[str] = []
+
+    class _GatedAgentSession(_FakeAgentSession):
+        async def send(self, prompt, images=(), files=()):
+            order.append(f"send:{prompt}")
+            self.sent.append(prompt)
+
+        async def events(self) -> AsyncIterator[Event]:
+            if self.sent == ["first"]:
+                await gate.wait()
+            order.append(f"events:{self.sent[-1]}")
+            yield Event(type=EventType.RESULT, content=self.sent[-1], done=True)
+
+    class _GatedAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="") -> AgentSession:
+            self.session = getattr(self, "session", None) or _GatedAgentSession()
+            return self.session
+
+    engine, _ = _make_engine(tmp_path)
+    agent = _GatedAgent()
+    engine.agents["fake"] = agent
+    platform = _FakePlatform()
+
+    msg1 = _make_message()
+    msg1.content = "first"
+    msg2 = _make_message()
+    msg2.content = "second"
+
+    task1 = asyncio.create_task(engine.on_message(platform, msg1))
+    await asyncio.sleep(0)  # let task1 start and block inside events()
+    task2 = asyncio.create_task(engine.on_message(platform, msg2))
+    await asyncio.sleep(0)  # let task2 observe the lock is held and queue
+
+    assert any("queued" in r for r in platform.replies)
+    assert order == ["send:first"]  # second message hasn't sent yet
+
+    gate.set()
+    await asyncio.gather(task1, task2)
+
+    assert order == ["send:first", "events:first", "send:second", "events:second"]
+    assert platform.replies[-2:] == ["first", "second"]

@@ -8,7 +8,7 @@ import logging
 from .agent import Agent
 from .commands import CommandRegistry
 from .platform import Platform
-from .router import Router
+from .router import ResolvedRoute, Router
 from .session_store import SessionStore
 from .types import Event, EventType, Message
 
@@ -56,6 +56,7 @@ class Engine:
         self.routers = routers
         self.session_store = session_store
         self.commands = commands
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
     async def on_message(self, platform: Platform, msg: Message) -> None:
         try:
@@ -73,6 +74,22 @@ class Engine:
             return
         route = router.resolve(msg.channel_key or msg.channel_id, msg.chat_name)
 
+        # Serialize per session_key: a second message arriving while the agent
+        # is still working a prior one must queue rather than race it (the
+        # claude_code backend speaks one stdin/stdout turn at a time, and a
+        # concurrent send() would corrupt that stream).
+        lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
+        if lock.locked():
+            await platform.send(
+                msg.reply_ctx,
+                "Still working on a previous message in this conversation -- "
+                "yours is queued and will run next.",
+            )
+
+        async with lock:
+            await self._handle_locked(platform, msg, route)
+
+    async def _handle_locked(self, platform: Platform, msg: Message, route: ResolvedRoute) -> None:
         expanded = self.commands.expand(msg.content)
         if expanded is not None:
             cmd, expanded_text = expanded
