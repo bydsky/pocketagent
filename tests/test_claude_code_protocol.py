@@ -260,22 +260,6 @@ for line in lines:
     print(json.dumps(line), flush=True)
 """
 
-FAKE_CLAUDE_WITH_USAGE = """
-import sys, json
-sys.stdin.readline()
-lines = [
-    {"type": "assistant", "message": {"model": "claude-sonnet-4-6", "content": [{"type": "text", "text": "Hello!"}]}, "session_id": "sess-1"},
-    {"type": "result", "subtype": "success", "result": "Hello!", "session_id": "sess-1",
-     "usage": {"input_tokens": 5, "output_tokens": 2}},
-]
-for line in lines:
-    print(json.dumps(line), flush=True)
-sys.stdin.readline()  # the /usage turn
-print(json.dumps({"type": "result", "subtype": "success",
-                   "result": "Current session: 40% used · resets Dec 31, 11:59pm (UTC)\\n"
-                             "Current week (all models): 17% used · resets Dec 31, 11:58pm (UTC)"}), flush=True)
-"""
-
 FAKE_CLAUDE_PERMISSION = """
 import sys, json
 sys.stdin.readline()
@@ -303,6 +287,44 @@ async def _spawn_fake(tmp_path: Path, script: str) -> asyncio.subprocess.Process
     )
 
 
+class _RecordingStdin:
+    def __init__(self):
+        self.written: list[bytes] = []
+
+    def write(self, data: bytes) -> None:
+        self.written.append(data)
+
+    async def drain(self) -> None:
+        pass
+
+
+class _LinesStdout:
+    def __init__(self, lines: list[bytes]):
+        self._lines = list(lines)
+
+    async def readline(self) -> bytes:
+        return self._lines.pop(0) if self._lines else b""
+
+
+class _FakeUsageProcess:
+    """An in-memory stand-in for the separate, throwaway claude process that
+    _fetch_rate_limits spawns -- no real subprocess needed since the test
+    only cares what gets written to/read from it."""
+
+    def __init__(self, result_text: str):
+        self.returncode: int | None = None
+        self.stdin = _RecordingStdin()
+        self.stdout = _LinesStdout(
+            [(json.dumps({"type": "result", "result": result_text}) + "\n").encode()]
+        )
+
+    def terminate(self) -> None:
+        self.returncode = 0
+
+    async def wait(self) -> int:
+        return 0
+
+
 @pytest.mark.asyncio
 async def test_session_basic_turn(tmp_path):
     process = await _spawn_fake(tmp_path, FAKE_CLAUDE_BASIC)
@@ -326,9 +348,23 @@ async def test_session_basic_turn(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_session_fetches_rate_limits_via_usage_command(tmp_path):
-    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_WITH_USAGE)
+async def test_session_fetches_rate_limits_via_separate_unresumed_process(tmp_path, monkeypatch):
+    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_BASIC)
     session = ClaudeCodeSession(process, str(tmp_path), show_footer=True)
+
+    usage_proc = _FakeUsageProcess(
+        "Current session: 40% used · resets Dec 31, 11:59pm (UTC)\n"
+        "Current week (all models): 17% used · resets Dec 31, 11:58pm (UTC)"
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["command"] = command
+        captured["args"] = args
+        return usage_proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
     try:
         await session.send("hi")
         events = []
@@ -341,22 +377,33 @@ async def test_session_fetches_rate_limits_via_usage_command(tmp_path):
         # reset stamps; just check each landed in the right unit.
         assert result_events[0].rate_limit_5h_reset_in.endswith(("m", "h", "d"))
         assert result_events[0].rate_limit_7d_reset_in.endswith(("m", "h", "d"))
+        # the regression this guards: /usage must go to a fresh, un-resumed
+        # process, never onto the live session's own stdin -- injecting it
+        # into the resumed transcript previously confused the model into
+        # treating later unrelated messages as commentary on the /usage
+        # exchange instead of answering them.
+        assert captured["command"] == "claude"
+        assert "--resume" not in captured["args"]
     finally:
         await session.close()
 
 
 @pytest.mark.asyncio
-async def test_session_skips_usage_turn_when_show_footer_is_false(tmp_path):
-    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_WITH_USAGE)
+async def test_session_skips_usage_turn_when_show_footer_is_false(tmp_path, monkeypatch):
+    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_BASIC)
     session = ClaudeCodeSession(process, str(tmp_path))  # show_footer defaults False
+
+    async def fail_create_subprocess_exec(*args, **kwargs):
+        raise AssertionError("should not fetch rate limits when show_footer is False")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fail_create_subprocess_exec)
+
     try:
         await session.send("hi")
         events = []
         async for ev in session.events():
             events.append(ev)
         result_events = [e for e in events if e.done]
-        # the channel isn't configured to show the footer, so the extra
-        # /usage turn (and its cost/transcript noise) must be skipped.
         assert result_events[0].rate_limit_5h_pct is None
         assert result_events[0].rate_limit_7d_pct is None
         assert result_events[0].rate_limit_5h_reset_in is None

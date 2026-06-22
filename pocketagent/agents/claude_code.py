@@ -48,12 +48,15 @@ JSON field anywhere in this protocol -- but the CLI's own `/usage` slash
 command reports them as plain text and is handled client-side (no API call:
 total_cost_usd 0, model "<synthetic>"). When show_footer is set (the channel
 is configured to display the reply footer -- see core/router.py), ClaudeCodeSession
-sends `/usage` as an extra turn after every real turn and parses its reply
-(_parse_usage_text); this means every reply costs two turns through the
-subprocess and adds a visible "/usage" exchange to this session's --resume
-transcript -- a deliberate tradeoff for always-fresh numbers over a
-cached/periodic refresh. Channels with the footer off skip this turn entirely
-since nothing would display the numbers anyway.
+fetches `/usage` from a brand-new, un-resumed claude process after every real
+turn and parses its reply (_parse_usage_text) -- NOT by sending it on the live
+session's own stdin: an earlier version did that, which injects a "/usage"
+exchange into this session's --resume transcript, and the model would then
+sometimes treat a later, unrelated user message as commentary on that earlier
+exchange instead of answering it. A throwaway process avoids polluting the
+transcript at the cost of spawning one extra subprocess per reply. Channels
+with the footer off skip this fetch entirely since nothing would display the
+numbers anyway.
 """
 
 from __future__ import annotations
@@ -286,11 +289,16 @@ def _save_files(work_dir: str, files: Sequence[FileAttachment]) -> list[str]:
 
 class ClaudeCodeSession(AgentSession):
     def __init__(
-        self, process: asyncio.subprocess.Process, work_dir: str, show_footer: bool = False
+        self,
+        process: asyncio.subprocess.Process,
+        work_dir: str,
+        show_footer: bool = False,
+        command: str = "claude",
     ) -> None:
         self._process = process
         self._work_dir = work_dir
         self._show_footer = show_footer
+        self._command = command
         self._session_id: str | None = None
         self._model: str = ""
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
@@ -366,31 +374,57 @@ class ClaudeCodeSession(AgentSession):
                 )
 
     async def _fetch_rate_limits(self) -> tuple[int | None, str | None, int | None, str | None]:
-        """Send `/usage` as its own turn and parse its plain-text reply.
+        """Send `/usage` to a brand-new, un-resumed claude process and parse its
+        plain-text reply.
 
-        This is a real conversation turn, not a side channel -- it adds a
-        "/usage" exchange to this session's resumed transcript on every call,
-        per the user's explicit choice of doing this on every turn rather than
-        caching it. See _parse_usage_text for why this is the only way to get
-        rate-limit percentages out of --print/stream-json mode.
+        This used to send `/usage` as an extra turn on the live session's own
+        stdin -- but that injects a "/usage" exchange into this session's
+        --resume transcript, which the model then sees on every later turn.
+        In practice that confused the model into treating a subsequent,
+        unrelated user message as commentary on the earlier /usage exchange
+        (replying with something like "no response needed, that's just a
+        local /usage command output" instead of answering the actual
+        question). Since /usage is account-level and client-side (no model
+        call: total_cost_usd 0, model "<synthetic>"), a throwaway process
+        with no --resume reports the same numbers without that side effect.
         """
-        if self._process.stdin is None:
-            return None, None, None, None
-        line = json.dumps({"type": "user", "message": {"role": "user", "content": "/usage"}}) + "\n"
         try:
-            self._process.stdin.write(line.encode("utf-8"))
-            await self._process.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError):
+            proc = await asyncio.create_subprocess_exec(
+                self._command,
+                "--print",
+                "--verbose",
+                "--input-format", "stream-json",
+                "--output-format", "stream-json",
+                "--permission-prompt-tool", "stdio",
+                cwd=self._work_dir,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError:
             return None, None, None, None
         try:
-            return await asyncio.wait_for(self._read_usage_result(), timeout=15)
-        except asyncio.TimeoutError:
+            assert proc.stdin is not None
+            line = json.dumps({"type": "user", "message": {"role": "user", "content": "/usage"}}) + "\n"
+            proc.stdin.write(line.encode("utf-8"))
+            await proc.stdin.drain()
+            return await asyncio.wait_for(self._read_usage_result(proc), timeout=15)
+        except (BrokenPipeError, ConnectionResetError, asyncio.TimeoutError):
             return None, None, None, None
+        finally:
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    proc.kill()
 
-    async def _read_usage_result(self) -> tuple[int | None, str | None, int | None, str | None]:
-        assert self._process.stdout is not None
+    async def _read_usage_result(
+        self, proc: asyncio.subprocess.Process
+    ) -> tuple[int | None, str | None, int | None, str | None]:
+        assert proc.stdout is not None
         while True:
-            raw = await self._process.stdout.readline()
+            raw = await proc.stdout.readline()
             if not raw:
                 return None, None, None, None
             line = raw.decode("utf-8", errors="replace").strip()
@@ -482,4 +516,4 @@ class ClaudeCodeAgent(Agent):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        return ClaudeCodeSession(process, work_dir, show_footer)
+        return ClaudeCodeSession(process, work_dir, show_footer, self.command)
