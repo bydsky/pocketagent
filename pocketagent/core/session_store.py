@@ -35,14 +35,19 @@ class SessionStore:
         self._save()
 
     async def get_or_create(
-        self, session_key: str, agent: Agent, work_dir: str, platform_system_prompt: str = ""
+        self,
+        session_key: str,
+        agent: Agent,
+        work_dir: str,
+        platform_system_prompt: str = "",
+        show_footer: bool = False,
     ) -> AgentSession:
         existing = self._live.get(session_key)
         if existing is not None and existing.alive():
             return existing
 
         resume_id = self._resume_ids.get(session_key)
-        session = await agent.start_session(resume_id, work_dir, platform_system_prompt)
+        session = await agent.start_session(resume_id, work_dir, platform_system_prompt, show_footer)
         self._live[session_key] = session
         return session
 

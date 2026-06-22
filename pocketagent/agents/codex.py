@@ -328,7 +328,11 @@ class CodexAgent(Agent):
         self.skip_git_repo_check = skip_git_repo_check
 
     async def start_session(
-        self, session_id: str | None, work_dir: str, platform_system_prompt: str = ""
+        self,
+        session_id: str | None,
+        work_dir: str,
+        platform_system_prompt: str = "",
+        show_footer: bool = False,
     ) -> AgentSession:
         system_prompt = _combine_system_prompts(self.agent_system_prompt, platform_system_prompt)
         return CodexSession(

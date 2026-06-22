@@ -398,7 +398,11 @@ class TmuxAgent(Agent):
         self.agent_system_prompt = agent_system_prompt
 
     async def start_session(
-        self, session_id: str | None, work_dir: str, platform_system_prompt: str = ""
+        self,
+        session_id: str | None,
+        work_dir: str,
+        platform_system_prompt: str = "",
+        show_footer: bool = False,
     ) -> AgentSession:
         if self.agent_system_prompt or platform_system_prompt:
             logger.warning(

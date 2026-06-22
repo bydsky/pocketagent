@@ -45,7 +45,11 @@ class Agent(ABC):
 
     @abstractmethod
     async def start_session(
-        self, session_id: str | None, work_dir: str, platform_system_prompt: str = ""
+        self,
+        session_id: str | None,
+        work_dir: str,
+        platform_system_prompt: str = "",
+        show_footer: bool = False,
     ) -> AgentSession:
         """Create or resume an interactive session rooted at work_dir.
 
@@ -55,7 +59,11 @@ class Agent(ABC):
         platform_system_prompt and is combined with this agent's own
         agent_system_prompt (a constructor-time option, set per agent in
         config); backends with no way to apply either to a session may
-        ignore them.
+        ignore them. show_footer mirrors the resolved route's show_footer
+        (see core/router.py): backends that fetch extra usage data purely to
+        populate the reply footer (e.g. claude_code's rate-limit lookup)
+        should skip that work when the channel isn't configured to show it;
+        backends with no such cost can ignore it.
         """
 
     async def stop(self) -> None:

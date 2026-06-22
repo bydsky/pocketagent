@@ -46,11 +46,14 @@ modelUsage[model].contextWindow), verified against a real statusLine payload.
 Rate-limit percentages (5h/7d usage) are likewise statusLine-only data with no
 JSON field anywhere in this protocol -- but the CLI's own `/usage` slash
 command reports them as plain text and is handled client-side (no API call:
-total_cost_usd 0, model "<synthetic>"). ClaudeCodeSession sends `/usage` as an
-extra turn after every real turn and parses its reply (_parse_usage_text);
-this means every reply costs two turns through the subprocess and adds a
-visible "/usage" exchange to this session's --resume transcript -- a
-deliberate tradeoff for always-fresh numbers over a cached/periodic refresh.
+total_cost_usd 0, model "<synthetic>"). When show_footer is set (the channel
+is configured to display the reply footer -- see core/router.py), ClaudeCodeSession
+sends `/usage` as an extra turn after every real turn and parses its reply
+(_parse_usage_text); this means every reply costs two turns through the
+subprocess and adds a visible "/usage" exchange to this session's --resume
+transcript -- a deliberate tradeoff for always-fresh numbers over a
+cached/periodic refresh. Channels with the footer off skip this turn entirely
+since nothing would display the numbers anyway.
 """
 
 from __future__ import annotations
@@ -239,9 +242,12 @@ def _save_files(work_dir: str, files: Sequence[FileAttachment]) -> list[str]:
 
 
 class ClaudeCodeSession(AgentSession):
-    def __init__(self, process: asyncio.subprocess.Process, work_dir: str) -> None:
+    def __init__(
+        self, process: asyncio.subprocess.Process, work_dir: str, show_footer: bool = False
+    ) -> None:
         self._process = process
         self._work_dir = work_dir
+        self._show_footer = show_footer
         self._session_id: str | None = None
         self._model: str = ""
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
@@ -300,9 +306,10 @@ class ClaudeCodeSession(AgentSession):
                     elif event.type == EventType.RESULT:
                         event.model = _format_model_name(self._model)
                         event.context_used_pct = _compute_context_used_pct(msg, self._model)
-                        event.rate_limit_5h_pct, event.rate_limit_7d_pct = (
-                            await self._fetch_rate_limits()
-                        )
+                        if self._show_footer:
+                            event.rate_limit_5h_pct, event.rate_limit_7d_pct = (
+                                await self._fetch_rate_limits()
+                            )
                     await self._queue.put(event)
         except asyncio.CancelledError:
             pass
@@ -397,7 +404,11 @@ class ClaudeCodeAgent(Agent):
         self.agent_system_prompt = agent_system_prompt
 
     async def start_session(
-        self, session_id: str | None, work_dir: str, platform_system_prompt: str = ""
+        self,
+        session_id: str | None,
+        work_dir: str,
+        platform_system_prompt: str = "",
+        show_footer: bool = False,
     ) -> AgentSession:
         args = [
             "--print",
@@ -425,4 +436,4 @@ class ClaudeCodeAgent(Agent):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        return ClaudeCodeSession(process, work_dir)
+        return ClaudeCodeSession(process, work_dir, show_footer)

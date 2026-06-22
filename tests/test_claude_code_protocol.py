@@ -287,7 +287,7 @@ async def test_session_basic_turn(tmp_path):
 @pytest.mark.asyncio
 async def test_session_fetches_rate_limits_via_usage_command(tmp_path):
     process = await _spawn_fake(tmp_path, FAKE_CLAUDE_WITH_USAGE)
-    session = ClaudeCodeSession(process, str(tmp_path))
+    session = ClaudeCodeSession(process, str(tmp_path), show_footer=True)
     try:
         await session.send("hi")
         events = []
@@ -296,6 +296,24 @@ async def test_session_fetches_rate_limits_via_usage_command(tmp_path):
         result_events = [e for e in events if e.done]
         assert result_events[0].rate_limit_5h_pct == 40
         assert result_events[0].rate_limit_7d_pct == 17
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_session_skips_usage_turn_when_show_footer_is_false(tmp_path):
+    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_WITH_USAGE)
+    session = ClaudeCodeSession(process, str(tmp_path))  # show_footer defaults False
+    try:
+        await session.send("hi")
+        events = []
+        async for ev in session.events():
+            events.append(ev)
+        result_events = [e for e in events if e.done]
+        # the channel isn't configured to show the footer, so the extra
+        # /usage turn (and its cost/transcript noise) must be skipped.
+        assert result_events[0].rate_limit_5h_pct is None
+        assert result_events[0].rate_limit_7d_pct is None
     finally:
         await session.close()
 

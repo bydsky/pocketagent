@@ -33,8 +33,11 @@ class _FakeAgentSession(AgentSession):
 class _FakeAgent(Agent):
     name = "fake"
 
-    async def start_session(self, session_id, work_dir, platform_system_prompt="") -> AgentSession:
+    async def start_session(
+        self, session_id, work_dir, platform_system_prompt="", show_footer=False
+    ) -> AgentSession:
         self.last_platform_system_prompt = platform_system_prompt
+        self.last_show_footer = show_footer
         return _FakeAgentSession()
 
 
@@ -165,7 +168,9 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
             )
 
     class _AgentWithUsage(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="") -> AgentSession:
+        async def start_session(
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+        ) -> AgentSession:
             return _AgentSessionWithUsage()
 
     engine, _ = _make_engine(tmp_path)
@@ -200,7 +205,9 @@ async def test_on_message_queues_second_message_while_first_is_in_flight(tmp_pat
             yield Event(type=EventType.RESULT, content=self.sent[-1], done=True)
 
     class _GatedAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="") -> AgentSession:
+        async def start_session(
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+        ) -> AgentSession:
             self.session = getattr(self, "session", None) or _GatedAgentSession()
             return self.session
 
