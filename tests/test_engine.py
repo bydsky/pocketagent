@@ -184,7 +184,7 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
     # event.model is already display-formatted by the agent backend that set it
     # (here, a raw test value) -- the engine just passes it through unchanged.
     assert platform.replies == [
-        "ok\n\n· claude-sonnet-4-6 · 14 tokens · ctx:14% · 5h:84%(2h49m) · 7d:14%(2d) · $0.0533"
+        "ok\n\n`claude-sonnet-4-6 · 14 tokens · ctx:14% · 5h:84%(2h49m) · 7d:14%(2d) · $0.0533`"
     ]
 
 

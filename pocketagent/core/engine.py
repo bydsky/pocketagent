@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def _format_footer(event: Event) -> str:
-    """Build a "· model · N tokens · ctx:%  5h:%  7d:%  $cost" footer from whatever
-    the agent reported.
+    """Build a "`model · N tokens · ctx:%  5h:%  7d:%  $cost`" inline-code footer
+    from whatever the agent reported.
 
     event.model is already display-formatted by whichever agent backend set it
     (see claude_code._format_model_name) -- the engine stays agent-agnostic and
@@ -43,7 +43,7 @@ def _format_footer(event: Event) -> str:
         parts.append(f"7d:{event.rate_limit_7d_pct}%{reset}")
     if event.cost_usd is not None:
         parts.append(f"${event.cost_usd:.4f}")
-    return f"· {' · '.join(parts)}" if parts else ""
+    return f"`{' · '.join(parts)}`" if parts else ""
 
 
 class Engine:
