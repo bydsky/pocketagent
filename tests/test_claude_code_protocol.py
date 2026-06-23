@@ -150,6 +150,19 @@ def test_parse_usage_text_extracts_both_percentages_and_resets():
     assert _parse_usage_text(text, now) == (40, "11m", 17, "4d")
 
 
+def test_parse_usage_text_handles_on_the_hour_resets():
+    # The CLI drops ":00" when a reset lands exactly on the hour ("8pm" rather
+    # than "8:00pm") -- the 7-day reset in particular tends to land on a fixed
+    # clock time and hits this far more often than the 5-hour one, which is
+    # what made the 7d countdown go missing in practice while 5h kept working.
+    text = (
+        "Current session: 35% used · resets Jun 23, 8pm (Australia/Sydney)\n"
+        "Current week (all models): 1% used · resets Jun 30, 6pm (Australia/Sydney)\n"
+    )
+    now = datetime(2026, 6, 23, 9, 0, tzinfo=timezone.utc)  # 2026-06-23 19:00 Sydney
+    assert _parse_usage_text(text, now) == (35, "1h", 1, "6d")
+
+
 def test_parse_usage_text_returns_none_when_unrecognized():
     assert _parse_usage_text("not a usage report") == (None, None, None, None)
 
@@ -348,6 +361,21 @@ async def test_session_basic_turn(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_session_stamps_effort_onto_result_event(tmp_path):
+    # --effort is never echoed back by the CLI on any stream-json message, so
+    # ClaudeCodeSession just stamps back whatever it was constructed with.
+    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_BASIC)
+    session = ClaudeCodeSession(process, str(tmp_path), effort="high")
+    try:
+        await session.send("hi")
+        events = [ev async for ev in session.events()]
+        result_events = [e for e in events if e.done]
+        assert result_events[0].effort == "high"
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
 async def test_session_fetches_rate_limits_via_separate_unresumed_process(tmp_path, monkeypatch):
     process = await _spawn_fake(tmp_path, FAKE_CLAUDE_BASIC)
     session = ClaudeCodeSession(process, str(tmp_path), show_footer=True)
@@ -477,6 +505,44 @@ async def test_start_session_passes_print_and_verbose(monkeypatch):
     try:
         assert "--print" in captured["args"]
         assert "--verbose" in captured["args"]
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_passes_effort_flag_when_configured(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent(effort="high")
+    session = await agent.start_session(None, "/tmp")
+    try:
+        args = captured["args"]
+        assert "--effort" in args
+        assert args[args.index("--effort") + 1] == "high"
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_omits_effort_flag_when_not_configured(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent()
+    session = await agent.start_session(None, "/tmp")
+    try:
+        assert "--effort" not in captured["args"]
     finally:
         await session.close()
 

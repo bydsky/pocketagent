@@ -63,6 +63,7 @@ class Event:
     input_tokens: int = 0
     output_tokens: int = 0
     model: str = ""
+    effort: str = ""
     cost_usd: float | None = None
     context_used_pct: int | None = None
     rate_limit_5h_pct: int | None = None

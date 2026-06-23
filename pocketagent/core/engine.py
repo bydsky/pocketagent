@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def _format_footer(event: Event) -> str:
-    """Build a "`model · N tokens · ctx:%  5h:%  7d:%  $cost`" inline-code footer
-    from whatever the agent reported.
+    """Build a "`model · effort · N tokens · ctx:%  5h:%  7d:%  $cost`" inline-code
+    footer from whatever the agent reported.
 
     event.model is already display-formatted by whichever agent backend set it
     (see claude_code._format_model_name) -- the engine stays agent-agnostic and
@@ -30,6 +30,8 @@ def _format_footer(event: Event) -> str:
     parts = []
     if event.model:
         parts.append(event.model)
+    if event.effort:
+        parts.append(event.effort)
     total_tokens = event.input_tokens + event.output_tokens
     if total_tokens:
         parts.append(f"{total_tokens} tokens")

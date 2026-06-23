@@ -90,6 +90,7 @@ AGENT_FACTORIES: dict[str, AgentFactory] = {
         command=opts.get("command", "claude"),
         model=opts.get("model", ""),
         permission_mode=opts.get("permission_mode", "default"),
+        effort=opts.get("effort", ""),
         extra_args=opts.get("extra_args", []),
         agent_system_prompt=opts.get("agent_system_prompt", ""),
     ),

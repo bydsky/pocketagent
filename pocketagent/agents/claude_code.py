@@ -35,6 +35,12 @@ footer without needing any claude-specific formatting logic itself. `result`
 does carry `total_cost_usd` directly, so that one maps straight through in
 translate_message.
 
+The CLI's own `--effort <level>` flag (low/medium/high/xhigh/max) is never
+echoed back anywhere in the stream-json protocol (confirmed: absent from
+`system`/`init`, `assistant`, and `result` messages alike), so unlike model
+there's nothing to read off the stream -- ClaudeCodeSession just stamps back
+the same effort string it was constructed with.
+
 The interactive CLI's own status line shows a context_window.used_percentage
 that has no equivalent field on `result` -- confirmed by configuring a
 statusLine command and running claude in this exact --print/stream-json mode:
@@ -191,7 +197,7 @@ def _format_model_name(model: str) -> str:
     return f"{family.capitalize()} {major}.{minor}"
 
 
-_RESET_CLAUSE = r"(?:\s*·\s*resets ([A-Za-z]{3} \d{1,2}, \d{1,2}:\d{2}(?:am|pm)) \(([^)]+)\))?"
+_RESET_CLAUSE = r"(?:\s*·\s*resets ([A-Za-z]{3} \d{1,2}, \d{1,2}(?::\d{2})?(?:am|pm)) \(([^)]+)\))?"
 _USAGE_SESSION_RE = re.compile(rf"Current session:\s*(\d+)%\s*used{_RESET_CLAUSE}")
 _USAGE_WEEK_RE = re.compile(rf"Current week \(all models\):\s*(\d+)%\s*used{_RESET_CLAUSE}")
 
@@ -214,6 +220,12 @@ def _parse_reset_in(date_str: str | None, tz_name: str | None, now: datetime) ->
     reports resets) into a compact countdown relative to now, a tz-aware
     reference instant. now is a parameter (rather than datetime.now() inline)
     so tests can pin "the present" without mocking the clock.
+
+    The CLI drops the ":00" when a reset lands exactly on the hour (e.g.
+    "Jun 23, 8pm" rather than "Jun 23, 8:00pm") -- the 7-day reset in
+    particular tends to land on a fixed clock time and hits this far more
+    often than the 5-hour one, so without normalizing it here the 7d
+    countdown went missing far more than the 5h one did.
     """
 
     if not date_str or not tz_name:
@@ -222,6 +234,8 @@ def _parse_reset_in(date_str: str | None, tz_name: str | None, now: datetime) ->
         tz = ZoneInfo(tz_name)
     except (ZoneInfoNotFoundError, ValueError):
         return None
+    if ":" not in date_str:
+        date_str = re.sub(r"(\d+)(am|pm)$", r"\1:00\2", date_str)
     naive = datetime.strptime(f"{date_str} 2000", "%b %d, %I:%M%p %Y")
     now_local = now.astimezone(tz)
     target = naive.replace(year=now_local.year, tzinfo=tz)
@@ -294,11 +308,13 @@ class ClaudeCodeSession(AgentSession):
         work_dir: str,
         show_footer: bool = False,
         command: str = "claude",
+        effort: str = "",
     ) -> None:
         self._process = process
         self._work_dir = work_dir
         self._show_footer = show_footer
         self._command = command
+        self._effort = effort
         self._session_id: str | None = None
         self._model: str = ""
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
@@ -356,6 +372,7 @@ class ClaudeCodeSession(AgentSession):
                         await self._auto_approve(event.request_id)
                     elif event.type == EventType.RESULT:
                         event.model = _format_model_name(self._model)
+                        event.effort = self._effort
                         event.context_used_pct = _compute_context_used_pct(msg, self._model)
                         if self._show_footer:
                             (
@@ -474,12 +491,14 @@ class ClaudeCodeAgent(Agent):
         command: str = "claude",
         model: str = "",
         permission_mode: str = "default",
+        effort: str = "",
         extra_args: Sequence[str] = (),
         agent_system_prompt: str = "",
     ) -> None:
         self.command = command
         self.model = model
         self.permission_mode = permission_mode
+        self.effort = effort
         self.extra_args = list(extra_args)
         self.agent_system_prompt = agent_system_prompt
 
@@ -501,6 +520,8 @@ class ClaudeCodeAgent(Agent):
             args += ["--permission-mode", self.permission_mode]
         if self.model:
             args += ["--model", self.model]
+        if self.effort:
+            args += ["--effort", self.effort]
         if session_id:
             args += ["--resume", session_id]
         system_prompt = _combine_system_prompts(self.agent_system_prompt, platform_system_prompt)
@@ -516,4 +537,4 @@ class ClaudeCodeAgent(Agent):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        return ClaudeCodeSession(process, work_dir, show_footer, self.command)
+        return ClaudeCodeSession(process, work_dir, show_footer, self.command, self.effort)

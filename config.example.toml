@@ -63,6 +63,9 @@ workspace = "support-bot"
 command = "claude"           # path to the Claude Code CLI binary
 model = ""                   # optional model override, e.g. "claude-opus-4-8"
 permission_mode = "default"  # default | acceptEdits | plan | bypassPermissions
+effort = ""                  # optional: low | medium | high | xhigh | max -- shown in the
+                              # reply footer (channels with show_footer on) since the CLI
+                              # never reports it back itself
 # agent_system_prompt = "You are deployed as a coding assistant; prefer small diffs."
                               # always-on system prompt for this agent, regardless of
                               # platform; combined with that platform's platform_system_prompt
