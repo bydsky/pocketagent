@@ -114,6 +114,26 @@ def test_translate_result_error():
     assert events[0].type == EventType.ERROR
     assert events[0].done is True
     assert events[0].error == "boom"
+    # Not persisting session_id on error results stops a failed --resume's
+    # echoed-back (invalid) id from being written to sessions.json and
+    # permanently wedging the channel.
+    assert events[0].session_id is None
+
+
+def test_translate_result_error_falls_back_to_errors_list():
+    # A failed --resume has no "result" text -- the reason lives in "errors"
+    # instead (e.g. claude's real reply: {"errors": ["No conversation found
+    # with session ID: ..."]}, no "result" key at all).
+    msg = {
+        "type": "result",
+        "is_error": True,
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "errors": ["No conversation found with session ID: 00000000-0000-0000-0000-000000000000"],
+    }
+    events = translate_message(msg)
+    assert events[0].type == EventType.ERROR
+    assert events[0].error == "No conversation found with session ID: 00000000-0000-0000-0000-000000000000"
+    assert events[0].session_id is None
 
 
 def test_translate_unknown_type_returns_empty():

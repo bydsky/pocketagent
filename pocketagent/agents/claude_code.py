@@ -70,6 +70,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Sequence
@@ -78,6 +79,16 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from ..core.agent import Agent, AgentSession
 from ..core.attachments import save_files
 from ..core.types import Event, EventType, FileAttachment, ImageAttachment
+
+logger = logging.getLogger(__name__)
+
+# asyncio.create_subprocess_exec defaults stdout's line-reader limit to 64 KiB;
+# a single stream-json line (e.g. an assistant message carrying a large tool
+# result) can exceed that, raising LimitOverrunError out of readline(). Without
+# a larger limit that exception used to go uncaught and silently kill the
+# reader task while the claude subprocess itself stayed alive -- see
+# ClaudeCodeSession._read_loop.
+_STDOUT_LIMIT = 16 * 1024 * 1024
 
 
 def translate_message(msg: dict[str, Any]) -> list[Event]:
@@ -138,13 +149,20 @@ def translate_message(msg: dict[str, Any]) -> list[Event]:
     if msg_type == "result":
         usage = msg.get("usage") or {}
         is_error = bool(msg.get("is_error"))
+        # A failed --resume (e.g. "No conversation found with session ID: ...")
+        # has no "result" text -- the reason lives in "errors" instead -- and
+        # echoes back the same (invalid) session_id we asked it to resume. Not
+        # persisting session_id on error results stops that bad id from being
+        # written back to sessions.json and permanently wedging the channel on
+        # every future message.
+        error_text = msg.get("result") or "; ".join(msg.get("errors") or []) or None
         return [
             Event(
                 type=EventType.ERROR if is_error else EventType.RESULT,
                 content=msg.get("result", ""),
-                session_id=session_id,
+                session_id=None if is_error else session_id,
                 done=True,
-                error=msg.get("result") if is_error else None,
+                error=error_text if is_error else None,
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
                 cost_usd=msg.get("total_cost_usd"),
@@ -317,6 +335,7 @@ class ClaudeCodeSession(AgentSession):
         self._effort = effort
         self._session_id: str | None = None
         self._model: str = ""
+        self._dead = False
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._reader_task = asyncio.create_task(self._read_loop())
 
@@ -325,7 +344,7 @@ class ClaudeCodeSession(AgentSession):
         return self._session_id
 
     def alive(self) -> bool:
-        return self._process.returncode is None
+        return self._process.returncode is None and not self._dead
 
     async def send(
         self,
@@ -383,12 +402,30 @@ class ClaudeCodeSession(AgentSession):
                             ) = await self._fetch_rate_limits()
                     await self._queue.put(event)
         except asyncio.CancelledError:
-            pass
-        finally:
+            return
+        except Exception:
+            # A line over _STDOUT_LIMIT (LimitOverrunError) or any other read
+            # failure used to leave the claude subprocess running but with no
+            # task left consuming its stdout -- alive() still said yes, so
+            # SessionStore kept reusing this session forever and every future
+            # events() call hung on an empty queue. Marking _dead and killing
+            # the subprocess here ensures the next message spawns a fresh one.
+            logger.exception("claude_code: reader loop crashed, resetting session")
+            self._dead = True
             if self._process.returncode is None:
-                await self._queue.put(
-                    Event(type=EventType.ERROR, error="agent process ended unexpectedly", done=True)
+                self._process.terminate()
+            await self._queue.put(
+                Event(
+                    type=EventType.ERROR,
+                    error="agent session hit an internal error and was reset -- please retry",
+                    done=True,
                 )
+            )
+            return
+        if self._process.returncode is None:
+            await self._queue.put(
+                Event(type=EventType.ERROR, error="agent process ended unexpectedly", done=True)
+            )
 
     async def _fetch_rate_limits(self) -> tuple[int | None, str | None, int | None, str | None]:
         """Send `/usage` to a brand-new, un-resumed claude process and parse its
@@ -417,6 +454,7 @@ class ClaudeCodeSession(AgentSession):
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                limit=_STDOUT_LIMIT,
             )
         except OSError:
             return None, None, None, None
@@ -536,5 +574,6 @@ class ClaudeCodeAgent(Agent):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=_STDOUT_LIMIT,
         )
         return ClaudeCodeSession(process, work_dir, show_footer, self.command, self.effort)
