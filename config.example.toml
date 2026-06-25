@@ -57,6 +57,23 @@ base_dir = "~/pocketagent-workspaces/telegram"
 agent = "claude_code"
 workspace = "support-bot"
 
+[platforms.slack]
+bot_token = "PUT_YOUR_SLACK_BOT_TOKEN_HERE"   # xoxb-...
+app_token = "PUT_YOUR_SLACK_APP_TOKEN_HERE"   # xapp-...; needs Socket Mode + the
+                                               # connections:write scope enabled on the app
+allow_from = ""                # comma-separated user IDs; empty = allow everyone
+# @mention is required in channels by default (DMs always work).
+# group_reply_all_channels = ""   # comma-separated channel IDs ("*" = all) that don't
+                                   # need @mention
+# require_mention_channels = ""   # comma-separated channel IDs that always need
+                                   # @mention, even inside a group_reply_all_channels channel
+default_agent = "claude_code"
+base_dir = "~/pocketagent-workspaces/slack"
+
+[platforms.slack.channels."C0123456789"]
+agent = "claude_code"
+workspace = "support-bot"
+
 # --- Agents ------------------------------------------------------------------
 
 [agents.claude_code]

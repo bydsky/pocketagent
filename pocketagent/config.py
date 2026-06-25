@@ -154,9 +154,23 @@ def build_telegram_platform(cfg: PlatformConfig, commands: CommandRegistry) -> P
     )
 
 
+def build_slack_platform(cfg: PlatformConfig, commands: CommandRegistry) -> Platform:
+    from .platforms.slack_platform import SlackPlatform
+
+    return SlackPlatform(
+        bot_token=cfg.options.get("bot_token", ""),
+        app_token=cfg.options.get("app_token", ""),
+        allow_from=cfg.options.get("allow_from", ""),
+        group_reply_all_channels=cfg.options.get("group_reply_all_channels", ""),
+        require_mention_channels=cfg.options.get("require_mention_channels", ""),
+        commands=commands,
+    )
+
+
 PLATFORM_FACTORIES: dict[str, Callable[[PlatformConfig, CommandRegistry], Platform]] = {
     "discord": build_discord_platform,
     "telegram": build_telegram_platform,
+    "slack": build_slack_platform,
 }
 
 

@@ -1,7 +1,7 @@
 # pocketagent
 
 Connects AI coding agents (Claude Code, Codex, tmux, with Gemini CLI planned)
-to chat platforms (Discord, Telegram, with Slack planned) so you can drive a
+to chat platforms (Discord, Telegram, Slack) so you can drive a
 coding agent from a chat app.
 
 ## How it works
@@ -45,6 +45,24 @@ pocketagent run -c pocketagent.toml
    require a mention by default; see `group_reply_all_guilds` in
    `config.example.toml` to relax that).
 
+### Slack bot setup
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** ->
+   **From scratch**.
+2. Under **Socket Mode**, enable it — this generates an app-level token (`xapp-...`) with
+   the `connections:write` scope; save it for `[platforms.slack].app_token`.
+3. Under **OAuth & Permissions**, add the bot token scopes `chat:write`, `channels:history`,
+   `groups:history`, `im:history`, `users:read`, and `files:read` (if you want attachments),
+   then **Install to Workspace**. Save the generated bot token (`xoxb-...`) for
+   `[platforms.slack].bot_token`.
+4. Under **Event Subscriptions**, enable events and subscribe to the bot event `message.channels`
+   (plus `message.groups`/`message.im` if you want private channels and DMs).
+5. In `pocketagent.toml`, set `[platforms.slack].bot_token` and `.app_token` from steps 2-3,
+   and adjust `base_dir`/`default_agent`/`allow_from` as needed.
+6. DM the bot directly, or `@mention` it in a channel it's been invited to (channels
+   require a mention by default; see `group_reply_all_channels` in `config.example.toml`
+   to relax that).
+
 ### Claude Code agent setup
 
 The default `claude_code` agent backend drives the `claude` CLI as a subprocess, so it
@@ -67,7 +85,7 @@ pocketagent/
   core/            platform-agnostic abstractions: Platform, Agent, Engine,
                    routing, workspaces, commands, session persistence
   platforms/       one module per chat platform (discord_platform.py,
-                   telegram_platform.py)
+                   telegram_platform.py, slack_platform.py)
   agents/          one module per agent backend (claude_code.py, codex.py,
                    tmux.py)
 ```

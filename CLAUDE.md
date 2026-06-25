@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-pocketagent bridges chat platforms (Discord, Telegram, with Slack planned) to AI coding
+pocketagent bridges chat platforms (Discord, Telegram, Slack) to AI coding
 agent CLIs (Claude Code, Codex, tmux, with Gemini CLI planned), so a coding agent can be
 driven from a chat app. Each platform has a default agent plus optional per-channel-id overrides
 (different agent and/or workspace per channel). Every channel gets its own workspace
@@ -48,7 +48,8 @@ Everything platform/agent-specific is hidden behind two ABCs in `pocketagent/cor
 - **`Platform`** (`core/platform.py`): `start(handler)`, `reply(reply_ctx, content)`,
   `send(reply_ctx, content)`, `stop()`, and `typing(reply_ctx)` (optional, default no-op
   async context manager). One implementation per chat platform lives in
-  `pocketagent/platforms/` (`discord_platform.py`, `telegram_platform.py`).
+  `pocketagent/platforms/` (`discord_platform.py`, `telegram_platform.py`,
+  `slack_platform.py`).
 - **`Agent`** / **`AgentSession`** (`core/agent.py`): `Agent.start_session(session_id,
   work_dir)` returns an `AgentSession` with `send(prompt, images, files)`,
   `events()` (async iterator of `Event`), `alive()`, `close()`. One implementation per
@@ -158,3 +159,26 @@ already delivers `/name args` as ordinary message text, so it flows through the 
 `CommandRegistry.expand()` path with no separate dispatch path needed. There's no native
 typing-indicator context manager in `python-telegram-bot`, so `typing()` builds one that
 calls `sendChatAction(typing)` on a loop (Telegram's indicator only lasts ~5s per call).
+
+### Slack platform (`platforms/slack_platform.py`)
+
+Built on `slack_bolt`'s async app, connected via Socket Mode (a persistent outbound
+websocket, started with `AsyncSocketModeHandler.connect_async()`) rather than the Events
+API's inbound HTTP webhook — like Discord's gateway and Telegram's polling, this needs no
+public endpoint or reverse proxy, so it works behind NAT. Requires two tokens: a bot token
+(`xoxb-...`) for posting/reading, and an app-level token (`xapp-...`, needs the
+`connections:write` scope) for the Socket Mode connection itself. DMs are always
+dispatched; public/private channel messages only dispatch when the bot is `@`-mentioned
+(stripped before handing off), unless the channel id is listed in
+`group_reply_all_channels` (mirrors Discord's `group_reply_all_guilds` /
+`require_mention_channels`, renamed `require_mention_channels` here too since Slack calls
+them channels already). Unlike Discord, Slack slash commands must be pre-registered in the
+app's own configuration (Slack's UI) rather than dynamically at runtime, so configured
+custom commands aren't registered as real Slack slash commands — typing `/name args` in a
+channel where `/name` isn't a Slack-native slash command for any installed app arrives as
+ordinary message text and flows through the same `CommandRegistry.expand()` path, mirroring
+Telegram. Slack's Web API has no "bot is typing" indicator for Socket Mode (the old
+RTM-only `typing` event was removed for bots), so `typing()` falls back to the base class's
+no-op. Channel names and display names aren't included on the `message` event itself, so
+they're fetched once per id via `conversations_info` / `users_info` and cached on the
+platform instance.
