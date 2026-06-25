@@ -1,4 +1,4 @@
-"""Agent abstraction: an AI coding assistant backend (Claude Code, Gemini CLI, tmux, ...)."""
+"""Agent abstraction: an AI coding assistant backend (Claude Code, Codex, tmux, ...)."""
 
 from __future__ import annotations
 

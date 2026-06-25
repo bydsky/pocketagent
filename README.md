@@ -1,6 +1,6 @@
 # pocketagent
 
-Connects AI coding agents (Claude Code, Codex, tmux, with Gemini CLI planned)
+Connects AI coding agents (Claude Code, Codex, tmux)
 to chat platforms (Discord, Telegram, Slack) so you can drive a
 coding agent from a chat app.
 

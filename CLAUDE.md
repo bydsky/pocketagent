@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 pocketagent bridges chat platforms (Discord, Telegram, Slack) to AI coding
-agent CLIs (Claude Code, Codex, tmux, with Gemini CLI planned), so a coding agent can be
+agent CLIs (Claude Code, Codex, tmux), so a coding agent can be
 driven from a chat app. Each platform has a default agent plus optional per-channel-id overrides
 (different agent and/or workspace per channel). Every channel gets its own workspace
 folder; folder bindings persist in `.pocketagent-bindings.json` so renaming a channel
