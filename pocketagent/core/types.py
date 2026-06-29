@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -70,3 +71,8 @@ class Event:
     rate_limit_7d_pct: int | None = None
     rate_limit_5h_reset_in: str | None = None  # compact countdown, e.g. "2h49m"
     rate_limit_7d_reset_in: str | None = None  # compact countdown, e.g. "2d"
+    # Set by an agent backend on an ERROR event when its own error text is a
+    # usage-limit denial it recognizes (agent-specific parsing -- see e.g.
+    # claude_code._parse_limit_denied) -- the engine just reads this generic
+    # field instead of pattern-matching agent-specific error wording itself.
+    rate_limit_retry_at: datetime | None = None

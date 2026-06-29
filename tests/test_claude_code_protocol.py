@@ -14,6 +14,7 @@ from pocketagent.agents.claude_code import (
     _compute_context_used_pct,
     _format_duration,
     _format_model_name,
+    _parse_limit_denied,
     _parse_reset_in,
     _parse_usage_text,
     _save_files,
@@ -204,6 +205,42 @@ def test_parse_reset_in_returns_none_for_unknown_timezone():
     assert _parse_reset_in("Jun 19, 2:29pm", "Not/AZone", now) is None
 
 
+def test_parse_limit_denied_extracts_time_and_timezone():
+    now = datetime(2026, 6, 26, 14, 0, 0, tzinfo=timezone.utc)
+    retry_at = _parse_limit_denied(
+        "You've hit your session limit · resets 2:50pm (Australia/Sydney)", now=now
+    )
+
+    assert retry_at is not None
+    assert retry_at.tzinfo is not None
+    assert (retry_at.hour, retry_at.minute) == (14, 50)
+
+
+def test_parse_limit_denied_rolls_over_to_tomorrow_when_time_already_passed():
+    from datetime import timedelta
+
+    now = datetime(2026, 6, 26, 23, 0, 0, tzinfo=timezone.utc)
+    retry_at = _parse_limit_denied(
+        "You've hit your session limit · resets 2:50pm (UTC)", now=now
+    )
+
+    assert retry_at.date() == (now.date() + timedelta(days=1))
+
+
+def test_parse_limit_denied_falls_back_to_utc_for_unknown_timezone():
+    now = datetime(2026, 6, 26, 1, 0, 0, tzinfo=timezone.utc)
+    retry_at = _parse_limit_denied(
+        "You've hit your weekly limit · resets 5:00am (Not/AZone)", now=now
+    )
+
+    assert retry_at is not None
+    assert retry_at.tzinfo is not None
+
+
+def test_parse_limit_denied_returns_none_for_unrelated_error():
+    assert _parse_limit_denied("agent process ended unexpectedly") is None
+
+
 @pytest.mark.parametrize(
     ("minutes", "expected"),
     [
@@ -304,6 +341,15 @@ behavior = resp["response"]["response"]["behavior"]
 print(json.dumps({"type": "result", "subtype": "success",
                    "result": "approved" if behavior == "allow" else "denied",
                    "session_id": "sess-1", "usage": {"input_tokens": 1, "output_tokens": 1}}), flush=True)
+"""
+
+
+FAKE_CLAUDE_DENIED = """
+import sys, json
+sys.stdin.readline()
+print(json.dumps({"type": "result", "subtype": "error", "is_error": True,
+                   "result": "You've hit your session limit \\u00b7 resets 11:59pm (UTC)",
+                   "session_id": "sess-1"}), flush=True)
 """
 
 
@@ -432,6 +478,25 @@ async def test_session_fetches_rate_limits_via_separate_unresumed_process(tmp_pa
         # exchange instead of answering them.
         assert captured["command"] == "claude"
         assert "--resume" not in captured["args"]
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_session_stamps_rate_limit_retry_at_on_denial_error(tmp_path):
+    # End-to-end through the real read loop (not just the pure _parse_limit_denied
+    # unit tests above) -- confirms ClaudeCodeSession actually wires the parser
+    # into ERROR events the same way it wires model/context_used_pct onto RESULT.
+    process = await _spawn_fake(tmp_path, FAKE_CLAUDE_DENIED)
+    session = ClaudeCodeSession(process, str(tmp_path))
+    try:
+        await session.send("hi")
+        events = [ev async for ev in session.events()]
+        error_events = [e for e in events if e.done]
+        assert len(error_events) == 1
+        assert error_events[0].type == EventType.ERROR
+        assert error_events[0].rate_limit_retry_at is not None
+        assert error_events[0].rate_limit_retry_at.tzinfo is not None
     finally:
         await session.close()
 

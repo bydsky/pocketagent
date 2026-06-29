@@ -10,7 +10,7 @@ from typing import Callable
 from .agent import Agent
 from .commands import CommandRegistry
 from .platform import Platform
-from .ratelimit import format_duration, parse_denial_reset_at, parse_relative_duration
+from .utils import format_duration, parse_relative_duration
 from .router import ResolvedRoute, Router
 from .scheduler import OneShotScheduler
 from .session_store import SessionStore
@@ -151,10 +151,11 @@ class Engine:
                 if event.done:
                     if event.type == EventType.ERROR:
                         error_text = event.error or "agent reported an error"
-                        retry_at = parse_denial_reset_at(error_text)
-                        if retry_at is not None:
-                            self._mark_rate_limited(route.agent_name, retry_at)
-                            await self._queue_for_retry(route.agent_name, platform, msg, retry_at)
+                        if event.rate_limit_retry_at is not None:
+                            self._mark_rate_limited(route.agent_name, event.rate_limit_retry_at)
+                            await self._queue_for_retry(
+                                route.agent_name, platform, msg, event.rate_limit_retry_at
+                            )
                             return
                         await platform.reply(msg.reply_ctx, f"Error: {error_text}")
                         return

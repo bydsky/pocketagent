@@ -78,7 +78,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..core.agent import Agent, AgentSession
 from ..core.attachments import save_files
-from ..core.ratelimit import format_duration as _format_duration
+from ..core.utils import format_duration as _format_duration
+from ..core.scheduler import next_occurrence, resolve_timezone
 from ..core.types import Event, EventType, FileAttachment, ImageAttachment
 
 logger = logging.getLogger(__name__)
@@ -275,6 +276,46 @@ def _parse_usage_text(
     )
 
 
+_LIMIT_DENIED_RE = re.compile(
+    r"hit your \w+ limit\D*?resets\s+(\d{1,2}:\d{2}\s*[ap]m)\s*\(([^)]+)\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_limit_denied(error_text: str, now: datetime | None = None) -> datetime | None:
+    """Parse claude_code's own usage-limit-denial error text -- e.g. "You've hit
+    your session limit · resets 2:50pm (Australia/Sydney)" -- into the absolute
+    instant it next resets (today or tomorrow, in the denial's own timezone), or
+    None if error_text isn't this kind of denial.
+
+    This wording is specific to claude_code's CLI, so the parsing lives here
+    rather than in core/utils.py -- core/engine.py only ever reads the
+    already-parsed Event.rate_limit_retry_at field this stamps, never this
+    function or its regex, so adding another agent backend with differently
+    worded denials needs no engine.py changes.
+
+    Falls back to UTC if the timezone name is missing/unrecognized, so the
+    result is always tz-aware (never the "naive local time" fallback that
+    resolve_timezone/next_occurrence use elsewhere for daily_reset, which
+    would make it unsafe to compare against the proactive 100%-usage signal's
+    UTC instant in Engine).
+    """
+
+    match = _LIMIT_DENIED_RE.search(error_text)
+    if not match:
+        return None
+    time_str, tz_name = match.group(1), match.group(2)
+    tz = resolve_timezone(tz_name) or timezone.utc
+    try:
+        target = datetime.strptime(time_str.replace(" ", "").upper(), "%I:%M%p").time()
+    except ValueError:
+        return None
+    # now, if given, may be in any tz (e.g. UTC) -- convert into tz first so
+    # replacing hour/minute lands on the right wall-clock instant.
+    now_in_tz = now.astimezone(tz) if now is not None else None
+    return next_occurrence(target, tz, now_in_tz)
+
+
 def _build_user_message(
     prompt: str, images: Sequence[ImageAttachment], file_paths: Sequence[str]
 ) -> dict[str, Any]:
@@ -377,6 +418,8 @@ class ClaudeCodeSession(AgentSession):
                 for event in translate_message(msg):
                     if event.type == EventType.PERMISSION_REQUEST:
                         await self._auto_approve(event.request_id)
+                    elif event.type == EventType.ERROR and event.error:
+                        event.rate_limit_retry_at = _parse_limit_denied(event.error)
                     elif event.type == EventType.RESULT:
                         event.model = _format_model_name(self._model)
                         event.effort = self._effort

@@ -228,10 +228,16 @@ async def test_clear_sessions_only_clears_keys_matching_predicate(tmp_path):
 async def test_error_matching_usage_limit_denial_queues_instead_of_showing_error(tmp_path):
     class _DeniedAgentSession(_FakeAgentSession):
         async def events(self) -> AsyncIterator[Event]:
+            # rate_limit_retry_at is set directly here rather than relying on
+            # text parsing -- that parsing is claude_code-specific (see
+            # claude_code._parse_limit_denied) and this fake "fake" agent
+            # backend isn't claude_code, so the engine must consume only the
+            # generic, already-computed field.
             yield Event(
                 type=EventType.ERROR,
                 error="You've hit your session limit · resets 11:59pm (UTC)",
                 done=True,
+                rate_limit_retry_at=datetime.now(timezone.utc) + timedelta(hours=1),
             )
 
     class _DeniedAgent(_FakeAgent):
