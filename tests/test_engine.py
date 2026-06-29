@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
 import pytest
@@ -221,6 +222,107 @@ async def test_clear_sessions_only_clears_keys_matching_predicate(tmp_path):
 
     assert "fake:111:1" not in engine.session_store._live
     assert "fake:222:1" in engine.session_store._live
+
+
+@pytest.mark.asyncio
+async def test_error_matching_usage_limit_denial_queues_instead_of_showing_error(tmp_path):
+    class _DeniedAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.ERROR,
+                error="You've hit your session limit · resets 11:59pm (UTC)",
+                done=True,
+            )
+
+    class _DeniedAgent(_FakeAgent):
+        async def start_session(
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+        ) -> AgentSession:
+            return _DeniedAgentSession()
+
+    engine, _ = _make_engine(tmp_path)
+    engine.agents["fake"] = _DeniedAgent()
+    platform = _FakePlatform()
+    msg = _make_message()
+
+    await engine.on_message(platform, msg)
+
+    assert "queued" in platform.replies[-1]
+    assert "fake" in engine._rate_limit_timers
+    assert engine._rate_limit_backlog["fake"] == [(platform, msg)]
+
+    for timer in engine._rate_limit_timers.values():
+        await timer.stop()
+
+
+@pytest.mark.asyncio
+async def test_message_while_agent_rate_limited_queues_without_calling_agent(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+
+    engine._mark_rate_limited("fake", datetime.now(timezone.utc) + timedelta(hours=1))
+
+    await engine.on_message(platform, msg)
+
+    assert "queued" in platform.replies[-1]
+    assert engine._rate_limit_backlog["fake"] == [(platform, msg)]
+    assert not hasattr(agent, "last_platform_system_prompt")  # start_session never called
+
+    for timer in engine._rate_limit_timers.values():
+        await timer.stop()
+
+
+@pytest.mark.asyncio
+async def test_result_with_rate_limit_pct_100_marks_agent_for_next_message(tmp_path):
+    class _MaxedAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content="ok",
+                done=True,
+                rate_limit_5h_pct=100,
+                rate_limit_5h_reset_in="11m",
+            )
+
+    class _MaxedAgent(_FakeAgent):
+        async def start_session(
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+        ) -> AgentSession:
+            return _MaxedAgentSession()
+
+    engine, _ = _make_engine(tmp_path)
+    engine.agents["fake"] = _MaxedAgent()
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert "ok" in platform.replies[0]  # this message's own reply still goes through
+    assert "fake" in engine._rate_limit_timers
+
+    for timer in engine._rate_limit_timers.values():
+        await timer.stop()
+
+
+@pytest.mark.asyncio
+async def test_backlog_flushes_and_replays_queued_messages_when_timer_fires(tmp_path):
+    engine, _ = _make_engine(tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+
+    engine._mark_rate_limited("fake", datetime.now(timezone.utc) - timedelta(seconds=1))
+    await engine.on_message(platform, msg)
+    assert "queued" in platform.replies[-1]
+    assert engine._rate_limit_backlog["fake"] == [(platform, msg)]
+
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if "fake" not in engine._rate_limit_timers:
+            break
+
+    assert "fake" not in engine._rate_limit_timers
+    assert engine._rate_limit_backlog.get("fake", []) == []
+    assert platform.replies[-1] == "ok"  # replayed message got a normal reply this time
 
 
 @pytest.mark.asyncio

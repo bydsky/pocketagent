@@ -72,12 +72,13 @@ import base64
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..core.agent import Agent, AgentSession
 from ..core.attachments import save_files
+from ..core.ratelimit import format_duration as _format_duration
 from ..core.types import Event, EventType, FileAttachment, ImageAttachment
 
 logger = logging.getLogger(__name__)
@@ -218,19 +219,6 @@ def _format_model_name(model: str) -> str:
 _RESET_CLAUSE = r"(?:\s*·\s*resets ([A-Za-z]{3} \d{1,2}, \d{1,2}(?::\d{2})?(?:am|pm)) \(([^)]+)\))?"
 _USAGE_SESSION_RE = re.compile(rf"Current session:\s*(\d+)%\s*used{_RESET_CLAUSE}")
 _USAGE_WEEK_RE = re.compile(rf"Current week \(all models\):\s*(\d+)%\s*used{_RESET_CLAUSE}")
-
-
-def _format_duration(delta: timedelta) -> str:
-    """Compact countdown for a reply footer: "2h49m" under a day, else "2d"."""
-
-    total_minutes = max(0, round(delta.total_seconds() / 60))
-    days, rem = divmod(total_minutes, 24 * 60)
-    hours, minutes = divmod(rem, 60)
-    if days:
-        return f"{days}d"
-    if hours:
-        return f"{hours}h{minutes}m" if minutes else f"{hours}h"
-    return f"{minutes}m"
 
 
 def _parse_reset_in(date_str: str | None, tz_name: str | None, now: datetime) -> str | None:

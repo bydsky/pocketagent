@@ -1,10 +1,12 @@
 import asyncio
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 import pytest
 
 from pocketagent.core.scheduler import (
     DailyScheduler,
+    OneShotScheduler,
+    next_occurrence,
     parse_time_of_day,
     resolve_timezone,
     seconds_until_next,
@@ -40,6 +42,53 @@ def test_seconds_until_next_at_exact_target_rolls_over():
     now = datetime(2026, 6, 26, 4, 0, 0)
     target = time(hour=4, minute=0)
     assert seconds_until_next(target, None, now=now) == 24 * 3600
+
+
+def test_next_occurrence_later_today():
+    now = datetime(2026, 6, 26, 1, 0, 0)
+    target = time(hour=4, minute=0)
+    assert next_occurrence(target, None, now=now) == datetime(2026, 6, 26, 4, 0, 0)
+
+
+def test_next_occurrence_rolls_over_to_tomorrow():
+    now = datetime(2026, 6, 26, 5, 0, 0)
+    target = time(hour=4, minute=0)
+    assert next_occurrence(target, None, now=now) == datetime(2026, 6, 27, 4, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_one_shot_scheduler_fires_once_and_can_be_stopped():
+    calls = []
+
+    async def callback():
+        calls.append(1)
+
+    scheduler = OneShotScheduler(datetime.now() - timedelta(seconds=1), callback)
+    scheduler.start()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert calls == [1]
+
+    await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_one_shot_scheduler_reschedule_pushes_later_only():
+    far_future = datetime.now() + timedelta(days=365)
+
+    async def noop():
+        pass
+
+    scheduler = OneShotScheduler(far_future, noop)
+
+    scheduler.reschedule(far_future - timedelta(days=1))  # earlier -- ignored
+    assert scheduler.run_at == far_future
+
+    scheduler.reschedule(far_future + timedelta(days=1))  # later -- applied
+    assert scheduler.run_at == far_future + timedelta(days=1)
+
+    await scheduler.stop()
 
 
 @pytest.mark.asyncio

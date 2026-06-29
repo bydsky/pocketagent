@@ -23,6 +23,12 @@ coding agent from a chat app.
   fresh session instead of resuming; any channel can override the time (or
   disable it) via `daily_reset_time` in its per-channel override. See
   `config.example.toml`.
+- **Usage-limit backlog**: when an agent backend reports its usage limit is
+  exhausted (claude_code's 5h/7d limits), pocketagent stops sending to it,
+  queues incoming messages (across every channel routed to that agent)
+  instead of erroring, and automatically replays them in order once the
+  limit resets — no config needed. Held in memory only, so a restart during
+  the limit window drops anything still queued.
 
 ## Setup
 

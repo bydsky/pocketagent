@@ -30,14 +30,21 @@ def resolve_timezone(name: str) -> ZoneInfo | None:
         return None
 
 
-def seconds_until_next(target: dt_time, tz: ZoneInfo | None, now: datetime | None = None) -> float:
-    """Seconds from `now` until the next occurrence of `target` time-of-day, today or tomorrow."""
+def next_occurrence(target: dt_time, tz: ZoneInfo | None, now: datetime | None = None) -> datetime:
+    """Absolute next occurrence of `target` time-of-day, today or tomorrow, in tz (or local)."""
 
     now = now if now is not None else (datetime.now(tz) if tz is not None else datetime.now())
     next_run = now.replace(hour=target.hour, minute=target.minute, second=0, microsecond=0)
     if next_run <= now:
         next_run += timedelta(days=1)
-    return (next_run - now).total_seconds()
+    return next_run
+
+
+def seconds_until_next(target: dt_time, tz: ZoneInfo | None, now: datetime | None = None) -> float:
+    """Seconds from `now` until the next occurrence of `target` time-of-day, today or tomorrow."""
+
+    now = now if now is not None else (datetime.now(tz) if tz is not None else datetime.now())
+    return (next_occurrence(target, tz, now) - now).total_seconds()
 
 
 class DailyScheduler:
@@ -75,3 +82,46 @@ class DailyScheduler:
                 await self._callback()
             except Exception:
                 logger.exception("daily scheduler callback failed")
+
+
+class OneShotScheduler:
+    """Sleeps until a specific absolute instant, then awaits callback() once.
+
+    Unlike DailyScheduler, reschedule() can push the firing time later (e.g. a
+    fresher signal reports a later reset) without losing whatever's already
+    waiting on it; it's a no-op if the new time isn't later than the current
+    one, so an earlier (more conservative) deadline is never shortened.
+    """
+
+    def __init__(self, run_at: datetime, callback: Callable[[], Awaitable[None]]) -> None:
+        self.run_at = run_at
+        self._callback = callback
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run())
+
+    def reschedule(self, run_at: datetime) -> None:
+        if run_at <= self.run_at:
+            return
+        self.run_at = run_at
+        if self._task is not None:
+            self._task.cancel()
+        self.start()
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+
+    async def _run(self) -> None:
+        delay = max(0.0, (self.run_at - datetime.now(self.run_at.tzinfo)).total_seconds())
+        await asyncio.sleep(delay)
+        try:
+            await self._callback()
+        except Exception:
+            logger.exception("one-shot scheduler callback failed")
