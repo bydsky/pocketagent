@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable
 
 from .agent import Agent, AgentSession
 
@@ -55,3 +56,28 @@ class SessionStore:
         for session in self._live.values():
             await session.close()
         self._live.clear()
+
+    async def clear_matching(self, predicate: Callable[[str], bool]) -> None:
+        """Close every live session and forget the resume id for any session_key
+        matching predicate.
+
+        Used by the daily-reset scheduler: the next message on a cleared channel
+        starts a brand-new agent session instead of resuming, mirroring what an
+        interactive `/clear` does inside the agent CLI itself. A scheduler with
+        a per-channel override clears only that channel's session_keys; the
+        global default scheduler clears everything else.
+        """
+
+        for key in [k for k in self._live if predicate(k)]:
+            await self._live.pop(key).close()
+
+        matching_resume_keys = [k for k in self._resume_ids if predicate(k)]
+        if matching_resume_keys:
+            for key in matching_resume_keys:
+                del self._resume_ids[key]
+            self._save()
+
+    async def clear_all(self) -> None:
+        """Close every live session and forget all persisted resume ids."""
+
+        await self.clear_matching(lambda _: True)

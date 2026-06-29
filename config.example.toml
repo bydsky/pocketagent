@@ -3,6 +3,14 @@
 # State (session resume ids) is kept under state_dir.
 state_dir = "~/.pocketagent"
 
+# Optional: reset every channel's conversation once a day at a fixed time --
+# the next message on each channel starts a brand-new agent session instead
+# of resuming, like running the agent CLI's own `/clear` everywhere at once.
+# Omit [daily_reset] (or leave time unset) to disable.
+# [daily_reset]
+# time = "04:00"             # 24h "HH:MM", in `timezone` (or local time if unset)
+# timezone = "America/New_York"  # IANA name; omit to use the host's local timezone
+
 # --- Platforms -------------------------------------------------------------
 
 [platforms.discord]
@@ -18,6 +26,11 @@ base_dir = "~/pocketagent-workspaces/discord"
 # show_footer = false          # append a "model · tokens · ctx% · 5h% · 7d% · $cost"
                                 # footer to replies (claude_code only; off by default);
                                 # overridable per channel below
+# daily_reset_exclude_channels = ["123456789012345678"]  # channel IDs on this
+                                # platform that never get the app-wide
+                                # [daily_reset] above (a channel can still opt
+                                # into its own schedule via daily_reset_time
+                                # below instead of being excluded)
 # Applied to every channel on this platform, combined with the handling
 # agent's own agent_system_prompt below (claude_code: both joined and sent
 # via --append-system-prompt; tmux: ignored, with a warning logged).
@@ -40,6 +53,12 @@ platform_system_prompt = """
 agent = "claude_code"
 workspace = "support-bot"    # fixed folder name instead of the channel's own name
 # show_footer = true         # turn on the footer just for this channel
+# daily_reset_time = "12:00"      # give this channel its own daily reset time
+                                   # instead of the app-wide [daily_reset] one
+                                   # (to exclude a channel entirely instead, list
+                                   # it in daily_reset_exclude_channels above)
+# daily_reset_timezone = ""       # IANA name for daily_reset_time; omit to use
+                                   # the host's local timezone
 
 [platforms.telegram]
 token = "PUT_YOUR_TELEGRAM_BOT_TOKEN_HERE"

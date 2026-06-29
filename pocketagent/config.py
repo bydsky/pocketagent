@@ -34,6 +34,8 @@ class AppConfig:
     platforms: dict[str, PlatformConfig]
     agent_options: dict[str, dict[str, Any]]
     commands: CommandRegistry
+    daily_reset_time: str = ""
+    daily_reset_timezone: str = ""
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -52,6 +54,8 @@ def load_config(path: str | Path) -> AppConfig:
                 agent=channel_cfg.get("agent"),
                 workspace=channel_cfg.get("workspace"),
                 show_footer=channel_cfg.get("show_footer"),
+                daily_reset_time=channel_cfg.get("daily_reset_time"),
+                daily_reset_timezone=channel_cfg.get("daily_reset_timezone", ""),
             )
             for channel_id, channel_cfg in raw.get("channels", {}).items()
         }
@@ -75,12 +79,78 @@ def load_config(path: str | Path) -> AppConfig:
             )
         )
 
+    daily_reset = data.get("daily_reset", {})
+
     return AppConfig(
         state_dir=state_dir,
         platforms=platforms,
         agent_options=data.get("agents", {}),
         commands=commands,
+        daily_reset_time=daily_reset.get("time", ""),
+        daily_reset_timezone=daily_reset.get("timezone", ""),
     )
+
+
+@dataclass
+class ResetGroup:
+    """One daily-reset firing time, and which channels it clears.
+
+    channel_pairs=None means "every channel without its own daily_reset_time
+    override and not listed in daily_reset_exclude_channels" (the app-wide
+    [daily_reset] default); exclude then lists the (platform, channel_id)
+    pairs carved out by an override or exclude list so the default doesn't
+    also clear them on its own schedule.
+    """
+
+    time: str
+    timezone: str
+    channel_pairs: set[tuple[str, str]] | None
+    exclude: frozenset[tuple[str, str]] = frozenset()
+
+    def predicate(self) -> Callable[[str], bool]:
+        if self.channel_pairs is not None:
+            prefixes = tuple(f"{platform}:{channel_id}:" for platform, channel_id in self.channel_pairs)
+            return lambda session_key: session_key.startswith(prefixes)
+        exclude_prefixes = tuple(f"{platform}:{channel_id}:" for platform, channel_id in self.exclude)
+        return lambda session_key: not session_key.startswith(exclude_prefixes)
+
+
+def build_reset_groups(config: AppConfig) -> list[ResetGroup]:
+    """Turn the app-wide [daily_reset] default plus any per-platform
+    daily_reset_exclude_channels list and per-channel daily_reset_time
+    overrides into a list of (time, timezone) -> channels groups, each
+    driving one DailyScheduler.
+    """
+
+    overridden: set[tuple[str, str]] = set()
+    custom: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for platform_name, platform_cfg in config.platforms.items():
+        for channel_id in platform_cfg.options.get("daily_reset_exclude_channels", []):
+            overridden.add((platform_name, str(channel_id)))
+
+        for channel_id, override in platform_cfg.channels.items():
+            if override.daily_reset_time is None:
+                continue  # inherits the app-wide default
+            pair = (platform_name, channel_id)
+            overridden.add(pair)
+            if not override.daily_reset_time:
+                continue  # explicit "" also disables the daily reset for this channel
+            key = (override.daily_reset_time, override.daily_reset_timezone)
+            custom.setdefault(key, set()).add(pair)
+
+    groups = [
+        ResetGroup(time=t, timezone=tz, channel_pairs=pairs) for (t, tz), pairs in custom.items()
+    ]
+    if config.daily_reset_time:
+        groups.append(
+            ResetGroup(
+                time=config.daily_reset_time,
+                timezone=config.daily_reset_timezone,
+                channel_pairs=None,
+                exclude=frozenset(overridden),
+            )
+        )
+    return groups
 
 
 AgentFactory = Callable[[dict[str, Any]], Agent]

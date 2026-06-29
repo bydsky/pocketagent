@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Callable
 
 from .agent import Agent
 from .commands import CommandRegistry
@@ -150,6 +151,17 @@ class Engine:
         stdout, _ = await proc.communicate()
         output = stdout.decode("utf-8", errors="replace").strip()
         return output or f"(command exited with code {proc.returncode}, no output)"
+
+    async def clear_sessions(self, predicate: Callable[[str], bool]) -> None:
+        """Reset every session_key matching predicate -- used by the daily-reset scheduler."""
+
+        await self.session_store.clear_matching(predicate)
+        logger.info("daily reset: cleared matching sessions")
+
+    async def clear_all_sessions(self) -> None:
+        """Reset every channel's conversation -- used by the daily-reset scheduler."""
+
+        await self.clear_sessions(lambda _: True)
 
     async def shutdown(self) -> None:
         await self.session_store.close_all()

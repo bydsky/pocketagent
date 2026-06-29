@@ -190,6 +190,40 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_clear_all_sessions_closes_live_sessions_and_forgets_resume_ids(tmp_path):
+    engine, _ = _make_engine(tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+
+    await engine.on_message(platform, msg)
+    assert msg.session_key in engine.session_store._live
+    engine.session_store.set_resume_id(msg.session_key, "resume-123")
+
+    await engine.clear_all_sessions()
+
+    assert engine.session_store._live == {}
+    assert engine.session_store._resume_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_clear_sessions_only_clears_keys_matching_predicate(tmp_path):
+    engine, _ = _make_engine(tmp_path)
+    platform = _FakePlatform()
+    msg_a = _make_message()
+    msg_a.session_key = "fake:111:1"
+    msg_b = _make_message()
+    msg_b.session_key = "fake:222:1"
+
+    await engine.on_message(platform, msg_a)
+    await engine.on_message(platform, msg_b)
+
+    await engine.clear_sessions(lambda key: key.startswith("fake:111:"))
+
+    assert "fake:111:1" not in engine.session_store._live
+    assert "fake:222:1" in engine.session_store._live
+
+
+@pytest.mark.asyncio
 async def test_on_message_queues_second_message_while_first_is_in_flight(tmp_path):
     """A second message for the same session_key must wait for the first turn
     to finish (and the same AgentSession instance) instead of racing it --

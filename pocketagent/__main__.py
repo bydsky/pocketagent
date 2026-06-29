@@ -7,7 +7,8 @@ import asyncio
 import logging
 import signal
 
-from .config import load_config, build_app
+from .config import build_app, build_reset_groups, load_config
+from .core.scheduler import DailyScheduler
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -39,10 +40,22 @@ async def _run(config_path: str) -> None:
         logging.info("starting platform %s", name)
         await platform.start(engine.on_message)
 
+    def _make_callback(predicate):
+        return lambda: engine.clear_sessions(predicate)
+
+    schedulers = [
+        DailyScheduler(group.time, _make_callback(group.predicate()), group.timezone)
+        for group in build_reset_groups(config)
+    ]
+    for scheduler in schedulers:
+        scheduler.start()
+
     try:
         await stop_event.wait()
     finally:
         logging.info("shutting down")
+        for scheduler in schedulers:
+            await scheduler.stop()
         for platform in platforms.values():
             await platform.stop()
         await engine.shutdown()

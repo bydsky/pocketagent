@@ -18,6 +18,11 @@ coding agent from a chat app.
   sent to the agent. See `config.example.toml`.
 - Conversation continuity survives restarts: the agent's own session id is
   persisted per channel/user and passed back via `--resume`.
+- **Daily reset**: an optional `[daily_reset]` time-of-day in config clears
+  every channel's conversation once a day, so the next message starts a
+  fresh session instead of resuming; any channel can override the time (or
+  disable it) via `daily_reset_time` in its per-channel override. See
+  `config.example.toml`.
 
 ## Setup
 
