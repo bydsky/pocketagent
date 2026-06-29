@@ -278,6 +278,60 @@ async def test_send_acks_interaction_and_sends_result_as_plain_channel_message()
     interaction.channel.send.assert_awaited_once_with("hi there")
 
 
+# --- proactive channel sends (scheduled tasks) -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reply_sends_directly_on_a_bare_channel_ctx():
+    platform = DiscordPlatform(token="t")
+    channel = _FakeChannel(id=10)
+
+    await platform.reply(channel, "hi there")
+
+    channel.send.assert_awaited_once_with("hi there")
+
+
+@pytest.mark.asyncio
+async def test_send_sends_directly_on_a_bare_channel_ctx():
+    platform = DiscordPlatform(token="t")
+    channel = _FakeChannel(id=10)
+
+    await platform.send(channel, "hi there")
+
+    channel.send.assert_awaited_once_with("hi there")
+
+
+@pytest.mark.asyncio
+async def test_make_channel_ctx_uses_cached_channel_when_available():
+    platform = DiscordPlatform(token="t")
+    channel = _FakeChannel(id=10)
+    client = _FakeClient(_FakeUser(id=1, bot=True))
+    client.get_channel = Mock(return_value=channel)
+    client.fetch_channel = AsyncMock()
+    platform._client = client
+
+    result = await platform.make_channel_ctx("10")
+
+    assert result is channel
+    client.get_channel.assert_called_once_with(10)
+    client.fetch_channel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_make_channel_ctx_falls_back_to_fetch_when_uncached():
+    platform = DiscordPlatform(token="t")
+    channel = _FakeChannel(id=10)
+    client = _FakeClient(_FakeUser(id=1, bot=True))
+    client.get_channel = Mock(return_value=None)
+    client.fetch_channel = AsyncMock(return_value=channel)
+    platform._client = client
+
+    result = await platform.make_channel_ctx("10")
+
+    assert result is channel
+    client.fetch_channel.assert_awaited_once_with(10)
+
+
 # --- typing indicator ------------------------------------------------------------
 
 
@@ -305,6 +359,16 @@ async def test_typing_uses_channel_typing_indicator():
     reply_ctx = Mock(channel=channel)
 
     async with platform.typing(reply_ctx):
+        assert channel.entered
+    assert channel.exited
+
+
+@pytest.mark.asyncio
+async def test_typing_uses_bare_channel_ctx_directly():
+    platform = DiscordPlatform(token="t")
+    channel = _FakeTypingChannel()
+
+    async with platform.typing(channel):
         assert channel.entered
     assert channel.exited
 

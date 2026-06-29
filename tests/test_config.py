@@ -71,6 +71,42 @@ def test_load_config_parses_platform_daily_reset_exclude_channels(tmp_path):
     assert config.platforms["discord"].options["daily_reset_exclude_channels"] == ["111", "222"]
 
 
+def test_load_config_parses_scheduled_tasks(tmp_path):
+    config_path = tmp_path / "pocketagent.toml"
+    config_path.write_text(
+        """
+        [platforms.discord]
+        token = "x"
+        default_agent = "claude_code"
+        base_dir = "/tmp/ws"
+
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "111"
+        user_id = "222"
+        time = "21:00"
+        timezone = "Australia/Sydney"
+        prompt = "Summarize today's new vocabulary."
+        """
+    )
+
+    config = load_config(config_path)
+
+    assert len(config.scheduled_tasks) == 1
+    task = config.scheduled_tasks[0]
+    assert task.platform == "discord"
+    assert task.channel_id == "111"
+    assert task.user_id == "222"
+    assert task.time == "21:00"
+    assert task.timezone == "Australia/Sydney"
+    assert task.prompt == "Summarize today's new vocabulary."
+
+
+def test_load_config_scheduled_tasks_defaults_to_empty():
+    config = _config()
+    assert config.scheduled_tasks == []
+
+
 def test_build_reset_groups_no_config_returns_nothing():
     config = _config()
     assert build_reset_groups(config) == []

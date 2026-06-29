@@ -16,6 +16,11 @@ used for typed text commands, so behavior (including {{1}}/{{N*}}/{{args}}
 placeholders) is identical either way. Slash commands skip the @mention
 gating that applies to plain messages, since invoking one is already an
 explicit, unambiguous action.
+
+make_channel_ctx (see core/scheduled_tasks.py) resolves a bare channel_id to
+a discord.abc.Messageable with no inbound message to anchor it to -- reply()/
+send() handle that case by sending directly on it instead of looking for a
+nested .channel attribute.
 """
 
 from __future__ import annotations
@@ -205,17 +210,31 @@ class DiscordPlatform(Platform):
         if isinstance(reply_ctx, discord.Interaction):
             await self._send_interaction_result(reply_ctx, content)
             return
-        message: discord.Message = reply_ctx
+        channel = self._channel_for(reply_ctx)
         for chunk in split_message(content, MAX_DISCORD_LEN):
-            await message.channel.send(chunk)
+            await channel.send(chunk)
 
     async def send(self, reply_ctx, content: str) -> None:
         if isinstance(reply_ctx, discord.Interaction):
             await self._send_interaction_result(reply_ctx, content)
             return
-        message: discord.Message = reply_ctx
+        channel = self._channel_for(reply_ctx)
         for chunk in split_message(content, MAX_DISCORD_LEN):
-            await message.channel.send(chunk)
+            await channel.send(chunk)
+
+    @staticmethod
+    def _channel_for(reply_ctx) -> discord.abc.Messageable:
+        # A real discord.Message carries its channel nested under .channel;
+        # make_channel_ctx instead hands back the channel itself (no inbound
+        # message to nest it under), so fall back to reply_ctx unchanged.
+        return getattr(reply_ctx, "channel", None) or reply_ctx
+
+    async def make_channel_ctx(self, channel_id: str) -> discord.abc.Messageable:
+        assert self._client is not None
+        channel = self._client.get_channel(int(channel_id))
+        if channel is None:
+            channel = await self._client.fetch_channel(int(channel_id))
+        return channel
 
     async def _send_interaction_result(self, interaction: discord.Interaction, content: str) -> None:
         # Close out the deferred interaction with an ack only the invoker sees,
@@ -226,7 +245,9 @@ class DiscordPlatform(Platform):
             await interaction.channel.send(chunk)
 
     def typing(self, reply_ctx):
-        channel = getattr(reply_ctx, "channel", None)
+        channel = getattr(reply_ctx, "channel", None) or (
+            reply_ctx if hasattr(reply_ctx, "typing") else None
+        )
         if channel is None:
             return super().typing(reply_ctx)
         return channel.typing()

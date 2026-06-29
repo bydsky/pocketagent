@@ -27,6 +27,14 @@ class SessionStore:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._state_path.write_text(json.dumps(self._resume_ids, indent=2))
 
+    def has_session(self, session_key: str) -> bool:
+        """Whether session_key has ever had a turn -- live or persisted resume
+        id. Used by scheduled tasks to skip firing a prompt into a channel
+        that has no conversation yet (a fresh, unresumed session would have
+        nothing to act on)."""
+
+        return session_key in self._live or session_key in self._resume_ids
+
     def set_resume_id(self, session_key: str, agent_session_id: str | None) -> None:
         if not agent_session_id:
             return

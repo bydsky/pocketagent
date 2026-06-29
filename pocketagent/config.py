@@ -29,6 +29,23 @@ class PlatformConfig:
 
 
 @dataclass
+class ScheduledTask:
+    """A prompt fired into one (platform, channel_id, user_id) session once a
+    day, with the reply posted proactively to that channel -- see
+    core/scheduled_tasks.py. Naturally pairs with [daily_reset]: schedule the
+    task for just before the channel's reset time so the prompt still sees
+    that day's conversation before it's cleared.
+    """
+
+    platform: str
+    channel_id: str
+    user_id: str
+    time: str
+    prompt: str
+    timezone: str = ""
+
+
+@dataclass
 class AppConfig:
     state_dir: str
     platforms: dict[str, PlatformConfig]
@@ -36,6 +53,7 @@ class AppConfig:
     commands: CommandRegistry
     daily_reset_time: str = ""
     daily_reset_timezone: str = ""
+    scheduled_tasks: list[ScheduledTask] = field(default_factory=list)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -81,6 +99,18 @@ def load_config(path: str | Path) -> AppConfig:
 
     daily_reset = data.get("daily_reset", {})
 
+    scheduled_tasks = [
+        ScheduledTask(
+            platform=raw["platform"],
+            channel_id=str(raw["channel_id"]),
+            user_id=str(raw["user_id"]),
+            time=raw["time"],
+            prompt=raw["prompt"],
+            timezone=raw.get("timezone", ""),
+        )
+        for raw in data.get("scheduled_tasks", [])
+    ]
+
     return AppConfig(
         state_dir=state_dir,
         platforms=platforms,
@@ -88,6 +118,7 @@ def load_config(path: str | Path) -> AppConfig:
         commands=commands,
         daily_reset_time=daily_reset.get("time", ""),
         daily_reset_timezone=daily_reset.get("timezone", ""),
+        scheduled_tasks=scheduled_tasks,
     )
 
 

@@ -78,6 +78,23 @@ async def test_clear_matching_only_clears_keys_matched_by_predicate(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_has_session_true_for_live_session(tmp_path):
+    store = SessionStore(tmp_path / "sessions.json")
+    agent = _FakeAgent()
+    await store.get_or_create("k1", agent, str(tmp_path))
+
+    assert store.has_session("k1") is True
+    assert store.has_session("k2") is False
+
+
+def test_has_session_true_for_persisted_resume_id_without_live_session(tmp_path):
+    store = SessionStore(tmp_path / "sessions.json")
+    store.set_resume_id("k1", "resume-abc")
+
+    assert store.has_session("k1") is True
+
+
+@pytest.mark.asyncio
 async def test_clear_all_then_get_or_create_starts_fresh_session(tmp_path):
     store = SessionStore(tmp_path / "sessions.json")
     agent = _FakeAgent()

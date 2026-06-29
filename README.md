@@ -29,6 +29,11 @@ coding agent from a chat app.
   instead of erroring, and automatically replays them in order once the
   limit resets — no config needed. Held in memory only, so a restart during
   the limit window drops anything still queued.
+- **Scheduled tasks**: optional `[[scheduled_tasks]]` entries fire a prompt
+  into a specific channel's existing session once a day and post the reply
+  proactively — e.g. a nightly "summarize today's new vocabulary" digest.
+  Reuses that channel's conversation history, and is skipped if the channel
+  has no session yet. See `config.example.toml`.
 
 ## Setup
 

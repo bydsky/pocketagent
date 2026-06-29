@@ -45,6 +45,17 @@ class Platform(ABC):
         """
         return _no_typing()
 
+    async def make_channel_ctx(self, channel_id: str) -> Any:
+        """Build a reply_ctx usable with reply()/send()/typing() for
+        channel_id, with no triggering inbound message -- used by scheduled
+        tasks (see core/scheduled_tasks.py) that proactively post into a
+        channel rather than responding to one.
+
+        Default: unsupported. Platforms that can address a channel directly
+        (e.g. Discord) override this.
+        """
+        raise NotImplementedError(f"{self.name}: proactive channel sends not supported")
+
 
 def allow_list(allow_from: str, user_id: str) -> bool:
     """Check whether user_id is permitted based on a comma-separated allow_from string.

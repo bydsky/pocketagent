@@ -8,6 +8,7 @@ import logging
 import signal
 
 from .config import build_app, build_reset_groups, load_config
+from .core.scheduled_tasks import run_scheduled_task
 from .core.scheduler import DailyScheduler
 
 
@@ -47,6 +48,17 @@ async def _run(config_path: str) -> None:
         DailyScheduler(group.time, _make_callback(group.predicate()), group.timezone)
         for group in build_reset_groups(config)
     ]
+
+    def _make_task_callback(platform, task):
+        return lambda: run_scheduled_task(engine, platform, task.channel_id, task.user_id, task.prompt)
+
+    for task in config.scheduled_tasks:
+        platform = platforms.get(task.platform)
+        if platform is None:
+            logging.warning("scheduled_tasks: unknown platform '%s', skipping", task.platform)
+            continue
+        schedulers.append(DailyScheduler(task.time, _make_task_callback(platform, task), task.timezone))
+
     for scheduler in schedulers:
         scheduler.start()
 

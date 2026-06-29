@@ -11,6 +11,21 @@ state_dir = "~/.pocketagent"
 # time = "04:00"             # 24h "HH:MM", in `timezone` (or local time if unset)
 # timezone = "America/New_York"  # IANA name; omit to use the host's local timezone
 
+# Optional: fire a prompt into a specific channel's existing session once a
+# day and post the reply proactively -- e.g. a nightly digest. Reuses that
+# channel's conversation history (via the agent's --resume), so it's skipped
+# entirely if the channel has no session yet. Repeat [[scheduled_tasks]] for
+# more than one. Schedule it just before that channel's daily_reset time (if
+# any) so the prompt still sees that day's conversation before it's cleared.
+# [[scheduled_tasks]]
+# platform = "discord"
+# channel_id = "123456789012345678"
+# user_id = "234567890123456789"   # whose session to use (sessions are per
+                                    # channel+user -- see session_key)
+# time = "21:00"
+# timezone = ""                    # IANA name; omit to use the host's local timezone
+# prompt = "Summarize all new vocabulary words discussed in this channel today."
+
 # --- Platforms -------------------------------------------------------------
 
 [platforms.discord]
