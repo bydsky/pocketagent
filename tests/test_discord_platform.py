@@ -51,13 +51,14 @@ class _FakeChannel:
 
 
 class _FakeMessage:
-    def __init__(self, content, author, channel, guild=None, mentions=None):
+    def __init__(self, content, author, channel, guild=None, mentions=None, reference=None):
         self.content = content
         self.author = author
         self.channel = channel
         self.guild = guild
         self.mentions = mentions or []
         self.attachments = []
+        self.reference = reference
 
 
 class _FakeClient:

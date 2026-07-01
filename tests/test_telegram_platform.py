@@ -39,6 +39,7 @@ class _FakeMessage:
         self.photo = []
         self.document = None
         self.reply_text = AsyncMock()
+        self.reply_to_message = None
 
 
 class _FakeUpdate:

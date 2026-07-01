@@ -40,6 +40,22 @@ from ..core.types import FileAttachment, ImageAttachment, Message
 logger = logging.getLogger(__name__)
 
 MAX_DISCORD_LEN = 1900
+MAX_QUOTED_LEN = 500
+
+
+async def _extract_quoted(message: discord.Message) -> str:
+    if message.reference is None:
+        return ""
+    resolved = message.reference.resolved
+    if isinstance(resolved, discord.Message):
+        return resolved.content[:MAX_QUOTED_LEN]
+    if message.reference.message_id is not None:
+        try:
+            ref = await message.channel.fetch_message(message.reference.message_id)
+            return ref.content[:MAX_QUOTED_LEN]
+        except discord.HTTPException:
+            pass
+    return ""
 
 
 async def _classify_attachments(
@@ -189,6 +205,7 @@ class DiscordPlatform(Platform):
 
         images, files = await _classify_attachments(message.attachments)
         channel_name = getattr(message.channel, "name", "") or ""
+        quoted_content = await _extract_quoted(message)
 
         msg = Message(
             session_key=f"discord:{message.channel.id}:{message.author.id}",
@@ -202,6 +219,7 @@ class DiscordPlatform(Platform):
             images=images,
             files=files,
             reply_ctx=message,
+            quoted_content=quoted_content,
         )
         assert self._handler is not None
         await self._handler(self, msg)

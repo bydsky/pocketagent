@@ -37,6 +37,7 @@ class Message:
     images: list[ImageAttachment] = field(default_factory=list)
     files: list[FileAttachment] = field(default_factory=list)
     reply_ctx: Any = None
+    quoted_content: str = ""  # content of the message being replied to, if any
 
 
 class EventType(Enum):

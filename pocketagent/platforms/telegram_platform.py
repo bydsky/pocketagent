@@ -35,7 +35,16 @@ from ..core.types import FileAttachment, ImageAttachment, Message as PocketMessa
 logger = logging.getLogger(__name__)
 
 MAX_TELEGRAM_LEN = 4000
+MAX_QUOTED_LEN = 500
 TYPING_REFRESH_SECONDS = 4
+
+
+def _extract_quoted(message: Message) -> str:
+    ref = message.reply_to_message
+    if ref is None:
+        return ""
+    text = ref.text or ref.caption or ""
+    return text[:MAX_QUOTED_LEN]
 
 
 async def _classify_attachments(
@@ -139,6 +148,7 @@ class TelegramPlatform(Platform):
 
         images, files = await _classify_attachments(message)
         chat_name = message.chat.title or message.chat.username or ""
+        quoted_content = _extract_quoted(message)
 
         msg = PocketMessage(
             session_key=f"telegram:{message.chat.id}:{message.from_user.id}",
@@ -152,6 +162,7 @@ class TelegramPlatform(Platform):
             images=images,
             files=files,
             reply_ctx=message,
+            quoted_content=quoted_content,
         )
         assert self._handler is not None
         await self._handler(self, msg)

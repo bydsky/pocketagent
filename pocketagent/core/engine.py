@@ -140,7 +140,10 @@ class Engine:
                 route.platform_system_prompt,
                 route.show_footer,
             )
-            await session.send(msg.content, msg.images, msg.files)
+            prompt = msg.content
+            if msg.quoted_content:
+                prompt = f"> {msg.quoted_content}\n\n{msg.content}"
+            await session.send(prompt, msg.images, msg.files)
 
             text_parts: list[str] = []
             async for event in session.events():

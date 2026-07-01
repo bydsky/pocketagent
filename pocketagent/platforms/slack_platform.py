@@ -45,6 +45,7 @@ from ..core.types import FileAttachment, ImageAttachment, Message
 logger = logging.getLogger(__name__)
 
 MAX_SLACK_LEN = 3500
+MAX_QUOTED_LEN = 500
 
 
 async def _download_file(session: aiohttp.ClientSession, token: str, url: str) -> bytes | None:
@@ -183,6 +184,7 @@ class SlackPlatform(Platform):
         images, file_attachments = await _classify_attachments(self.bot_token, files)
         chat_name = await self._channel_name(client, channel_id) if is_channel else ""
         user_name = await self._user_name(client, user_id)
+        quoted_content = await self._extract_quoted(client, event, channel_id)
 
         msg = Message(
             session_key=f"slack:{channel_id}:{user_id}",
@@ -196,9 +198,26 @@ class SlackPlatform(Platform):
             images=images,
             files=file_attachments,
             reply_ctx=event,
+            quoted_content=quoted_content,
         )
         assert self._handler is not None
         await self._handler(self, msg)
+
+    async def _extract_quoted(self, client, event: dict, channel_id: str) -> str:
+        thread_ts = event.get("thread_ts")
+        ts = event.get("ts")
+        if not thread_ts or thread_ts == ts:
+            return ""
+        try:
+            result = await client.conversations_history(
+                channel=channel_id, latest=thread_ts, limit=1, inclusive=True
+            )
+            messages = (result.get("messages") or [])
+            if messages:
+                return (messages[0].get("text") or "")[:MAX_QUOTED_LEN]
+        except SlackApiError:
+            pass
+        return ""
 
     async def reply(self, reply_ctx, content: str) -> None:
         await self._post(reply_ctx, content)
