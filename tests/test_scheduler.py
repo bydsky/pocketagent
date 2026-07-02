@@ -4,17 +4,16 @@ from datetime import datetime, time, timedelta
 import pytest
 
 from pocketagent.core.scheduler import (
+    CronScheduler,
     DailyScheduler,
-    IntervalScheduler,
     OneShotScheduler,
-    WeeklyScheduler,
+    next_cron_occurrence,
     next_occurrence,
-    next_weekly_occurrence,
     parse_time_of_day,
-    parse_weekday,
     resolve_timezone,
     seconds_until_next,
-    seconds_until_next_weekly,
+    seconds_until_next_cron,
+    validate_cron,
 )
 
 
@@ -143,98 +142,62 @@ async def test_daily_scheduler_keeps_running_after_callback_raises(monkeypatch):
     await scheduler.stop()
 
 
-@pytest.mark.asyncio
-async def test_interval_scheduler_runs_callback_repeatedly_and_can_be_stopped():
-    calls = []
-
-    async def callback():
-        calls.append(1)
-
-    scheduler = IntervalScheduler(timedelta(seconds=0), callback)
-    scheduler.start()
-    for _ in range(5):
-        await asyncio.sleep(0)
-        if len(calls) >= 2:
-            break
-
-    assert len(calls) >= 2
-
-    await scheduler.stop()
+def test_validate_cron_accepts_valid_expression():
+    validate_cron("0 19 * * 4")  # doesn't raise
 
 
-@pytest.mark.asyncio
-async def test_interval_scheduler_keeps_running_after_callback_raises():
-    calls = []
-
-    async def flaky_callback():
-        calls.append(1)
-        if len(calls) == 1:
-            raise RuntimeError("boom")
-
-    scheduler = IntervalScheduler(timedelta(seconds=0), flaky_callback)
-    scheduler.start()
-    for _ in range(5):
-        await asyncio.sleep(0)
-        if len(calls) >= 2:
-            break
-
-    assert len(calls) >= 2
-
-    await scheduler.stop()
-
-
-def test_parse_weekday_case_insensitive():
-    assert parse_weekday("Thursday") == 3
-    assert parse_weekday("  monday ") == 0
-
-
-def test_parse_weekday_rejects_unknown_name():
+def test_validate_cron_rejects_invalid_expression():
     with pytest.raises(ValueError):
-        parse_weekday("someday")
+        validate_cron("not a cron expression")
 
 
-def test_next_weekly_occurrence_same_day_before_target_time():
+def test_next_cron_occurrence_same_day_before_target_time():
     # 2026-07-02 is a Thursday.
     now = datetime(2026, 7, 2, 10, 0)
-    assert next_weekly_occurrence(time(19, 0), 3, 1, None, now=now) == datetime(2026, 7, 2, 19, 0)
+    assert next_cron_occurrence("0 19 * * 4", 1, None, now=now) == datetime(2026, 7, 2, 19, 0)
 
 
-def test_next_weekly_occurrence_same_day_after_target_time_rolls_to_next_week():
+def test_next_cron_occurrence_same_day_after_target_time_rolls_to_next_week():
     now = datetime(2026, 7, 2, 20, 0)
-    assert next_weekly_occurrence(time(19, 0), 3, 1, None, now=now) == datetime(2026, 7, 9, 19, 0)
+    assert next_cron_occurrence("0 19 * * 4", 1, None, now=now) == datetime(2026, 7, 9, 19, 0)
 
 
-def test_next_weekly_occurrence_different_day_rolls_forward():
+def test_next_cron_occurrence_different_day_rolls_forward():
     # 2026-06-29 is a Monday; next Thursday is 2026-07-02.
     now = datetime(2026, 6, 29, 8, 0)
-    assert next_weekly_occurrence(time(19, 0), 3, 1, None, now=now) == datetime(2026, 7, 2, 19, 0)
+    assert next_cron_occurrence("0 19 * * 4", 1, None, now=now) == datetime(2026, 7, 2, 19, 0)
 
 
-def test_next_weekly_occurrence_biweekly_gap_is_exactly_two_weeks():
+def test_next_cron_occurrence_biweekly_gap_is_exactly_two_weeks():
     now = datetime(2026, 7, 2, 10, 0)
-    first = next_weekly_occurrence(time(19, 0), 3, 2, None, now=now)
-    second = next_weekly_occurrence(time(19, 0), 3, 2, None, now=first + timedelta(seconds=1))
+    first = next_cron_occurrence("0 19 * * 4", 2, None, now=now)
+    second = next_cron_occurrence("0 19 * * 4", 2, None, now=first + timedelta(seconds=1))
     assert (second - first) == timedelta(weeks=2)
     assert first.strftime("%A") == second.strftime("%A") == "Thursday"
 
 
-def test_seconds_until_next_weekly():
+def test_next_cron_occurrence_daily_expression():
+    now = datetime(2026, 6, 26, 1, 0, 0)
+    assert next_cron_occurrence("0 4 * * *", 1, None, now=now) == datetime(2026, 6, 26, 4, 0, 0)
+
+
+def test_seconds_until_next_cron():
     now = datetime(2026, 7, 2, 10, 0)
-    assert seconds_until_next_weekly(time(19, 0), 3, 1, None, now=now) == 9 * 3600
+    assert seconds_until_next_cron("0 19 * * 4", 1, None, now=now) == 9 * 3600
 
 
 @pytest.mark.asyncio
-async def test_weekly_scheduler_runs_callback_and_can_be_stopped(monkeypatch):
+async def test_cron_scheduler_runs_callback_and_can_be_stopped(monkeypatch):
     calls = []
 
     async def callback():
         calls.append(1)
 
     monkeypatch.setattr(
-        "pocketagent.core.scheduler.seconds_until_next_weekly", lambda *a, **k: 0
+        "pocketagent.core.scheduler.seconds_until_next_cron", lambda *a, **k: 0
     )
 
-    scheduler = WeeklyScheduler("19:00", "thursday", callback)
+    scheduler = CronScheduler("0 19 * * 4", callback)
     scheduler.start()
     await asyncio.sleep(0)
     await asyncio.sleep(0)
@@ -245,7 +208,7 @@ async def test_weekly_scheduler_runs_callback_and_can_be_stopped(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_weekly_scheduler_keeps_running_after_callback_raises(monkeypatch):
+async def test_cron_scheduler_keeps_running_after_callback_raises(monkeypatch):
     calls = []
 
     async def flaky_callback():
@@ -254,10 +217,10 @@ async def test_weekly_scheduler_keeps_running_after_callback_raises(monkeypatch)
             raise RuntimeError("boom")
 
     monkeypatch.setattr(
-        "pocketagent.core.scheduler.seconds_until_next_weekly", lambda *a, **k: 0
+        "pocketagent.core.scheduler.seconds_until_next_cron", lambda *a, **k: 0
     )
 
-    scheduler = WeeklyScheduler("19:00", "thursday", flaky_callback)
+    scheduler = CronScheduler("0 19 * * 4", flaky_callback)
     scheduler.start()
     for _ in range(5):
         await asyncio.sleep(0)
@@ -267,3 +230,11 @@ async def test_weekly_scheduler_keeps_running_after_callback_raises(monkeypatch)
     assert len(calls) >= 2
 
     await scheduler.stop()
+
+
+def test_cron_scheduler_construction_rejects_invalid_cron():
+    async def callback():
+        pass
+
+    with pytest.raises(ValueError):
+        CronScheduler("not a cron expression", callback)

@@ -87,7 +87,7 @@ def test_load_config_parses_scheduled_tasks(tmp_path):
         platform = "discord"
         channel_id = "111"
         user_id = "222"
-        time = "21:00"
+        cron = "0 21 * * *"
         timezone = "Australia/Sydney"
         prompt = "Summarize today's new vocabulary."
         """
@@ -100,7 +100,7 @@ def test_load_config_parses_scheduled_tasks(tmp_path):
     assert task.platform == "discord"
     assert task.channel_id == "111"
     assert task.user_id == "222"
-    assert task.time == "21:00"
+    assert task.cron == "0 21 * * *"
     assert task.timezone == "Australia/Sydney"
     assert task.prompt == "Summarize today's new vocabulary."
 

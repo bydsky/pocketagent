@@ -186,7 +186,7 @@ async def test_on_message_writes_scheduled_task_and_shows_confirmation(tmp_path)
                 type=EventType.RESULT,
                 content=(
                     "Sure, I'll check in daily.\n\n"
-                    '```schedule-task\ntime = "09:00"\ntimezone = "UTC"\n'
+                    '```schedule-task\ncron = "0 9 * * *"\ntimezone = "UTC"\n'
                     'prompt = "Check on the build."\n```'
                 ),
                 done=True,
@@ -214,7 +214,7 @@ async def test_on_message_writes_scheduled_task_and_shows_confirmation(tmp_path)
     assert len(platform.replies) == 1
     assert "Sure, I'll check in daily." in platform.replies[0]
     assert "schedule-task" not in platform.replies[0]
-    assert "Scheduled daily at 09:00 UTC." in platform.replies[0]
+    assert "Scheduled '0 9 * * *' UTC." in platform.replies[0]
 
     from pocketagent.core.scheduled_tasks import load_scheduled_tasks
 
@@ -223,7 +223,7 @@ async def test_on_message_writes_scheduled_task_and_shows_confirmation(tmp_path)
     assert tasks[0].platform == "fake"
     assert tasks[0].channel_id == "1"
     assert tasks[0].user_id == "1"
-    assert tasks[0].time == "09:00"
+    assert tasks[0].cron == "0 9 * * *"
     assert tasks[0].timezone == "UTC"
     assert tasks[0].prompt == "Check on the build."
 
@@ -234,7 +234,7 @@ async def test_on_message_schedule_task_error_shown_and_nothing_written(tmp_path
         async def events(self) -> AsyncIterator[Event]:
             yield Event(
                 type=EventType.RESULT,
-                content='```schedule-task\ntime = "99:99"\nprompt = "hi"\n```',
+                content='```schedule-task\ncron = "not a cron expression"\nprompt = "hi"\n```',
                 done=True,
             )
 
@@ -262,58 +262,14 @@ async def test_on_message_schedule_task_error_shown_and_nothing_written(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_on_message_writes_interval_scheduled_task_and_shows_confirmation(tmp_path):
-    class _SchedulingAgentSession(_FakeAgentSession):
-        async def events(self) -> AsyncIterator[Event]:
-            yield Event(
-                type=EventType.RESULT,
-                content=(
-                    "Sure, I'll check in every couple hours.\n\n"
-                    '```schedule-task\nevery = "2h"\nprompt = "Check on the build."\n```'
-                ),
-                done=True,
-            )
-
-    class _SchedulingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
-            return _SchedulingAgentSession()
-
-    agent = _SchedulingAgent()
-    workspace = WorkspaceManager(tmp_path / "workspace")
-    router = Router(default_agent="fake", workspace=workspace)
-    session_store = SessionStore(tmp_path / "sessions.json")
-    engine = Engine(
-        agents={"fake": agent},
-        routers={"fake": router},
-        session_store=session_store,
-        commands=CommandRegistry(),
-        scheduled_tasks_dir=tmp_path,
-    )
-    platform = _FakePlatform()
-
-    await engine.on_message(platform, _make_message())
-
-    assert "schedule-task" not in platform.replies[0]
-    assert "Scheduled every 2h." in platform.replies[0]
-
-    from pocketagent.core.scheduled_tasks import load_scheduled_tasks
-
-    tasks = load_scheduled_tasks(tmp_path)
-    assert len(tasks) == 1
-    assert tasks[0].every == "2h"
-    assert tasks[0].time == ""
-    assert tasks[0].prompt == "Check on the build."
-
-
-@pytest.mark.asyncio
-async def test_on_message_writes_weekly_scheduled_task_and_shows_confirmation(tmp_path):
+async def test_on_message_writes_biweekly_scheduled_task_and_shows_confirmation(tmp_path):
     class _SchedulingAgentSession(_FakeAgentSession):
         async def events(self) -> AsyncIterator[Event]:
             yield Event(
                 type=EventType.RESULT,
                 content=(
                     "Sure, I'll check in every other Thursday.\n\n"
-                    '```schedule-task\ntime = "19:00"\nweekday = "thursday"\n'
+                    '```schedule-task\ncron = "0 19 * * 4"\n'
                     'interval_weeks = 2\nprompt = "Check on the build."\n```'
                 ),
                 done=True,
@@ -339,16 +295,15 @@ async def test_on_message_writes_weekly_scheduled_task_and_shows_confirmation(tm
     await engine.on_message(platform, _make_message())
 
     assert "schedule-task" not in platform.replies[0]
-    assert "Scheduled every 2 weeks on Thursday at 19:00." in platform.replies[0]
+    assert "Scheduled '0 19 * * 4'" in platform.replies[0]
+    assert "every 2 weeks" in platform.replies[0]
 
     from pocketagent.core.scheduled_tasks import load_scheduled_tasks
 
     tasks = load_scheduled_tasks(tmp_path)
     assert len(tasks) == 1
-    assert tasks[0].weekday == "thursday"
+    assert tasks[0].cron == "0 19 * * 4"
     assert tasks[0].interval_weeks == 2
-    assert tasks[0].time == "19:00"
-    assert tasks[0].every == ""
 
 
 @pytest.mark.asyncio

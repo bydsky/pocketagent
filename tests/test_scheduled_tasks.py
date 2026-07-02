@@ -123,7 +123,7 @@ async def test_skips_quietly_when_platform_does_not_support_proactive_sends(tmp_
 
 def test_append_scheduled_task_creates_file_and_is_readable_back(tmp_path):
     task = ScheduledTask(
-        platform="discord", channel_id="111", user_id="222", time="09:00", prompt="hi", timezone="UTC"
+        platform="discord", channel_id="111", user_id="222", cron="0 9 * * *", prompt="hi", timezone="UTC"
     )
 
     append_scheduled_task(tmp_path, task)
@@ -133,8 +133,8 @@ def test_append_scheduled_task_creates_file_and_is_readable_back(tmp_path):
 
 
 def test_append_scheduled_task_twice_keeps_both_entries(tmp_path):
-    first = ScheduledTask(platform="discord", channel_id="1", user_id="1", time="09:00", prompt="one")
-    second = ScheduledTask(platform="discord", channel_id="2", user_id="2", time="10:00", prompt="two")
+    first = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="one")
+    second = ScheduledTask(platform="discord", channel_id="2", user_id="2", cron="0 10 * * *", prompt="two")
 
     append_scheduled_task(tmp_path, first)
     append_scheduled_task(tmp_path, second)
@@ -147,7 +147,7 @@ def test_append_scheduled_task_escapes_special_characters_in_prompt(tmp_path):
         platform="discord",
         channel_id="1",
         user_id="1",
-        time="09:00",
+        cron="0 9 * * *",
         prompt='has "quotes", a\nnewline, and a \\backslash',
     )
 
@@ -159,79 +159,11 @@ def test_append_scheduled_task_escapes_special_characters_in_prompt(tmp_path):
 def test_append_scheduled_task_preserves_existing_file_content(tmp_path):
     path = tmp_path / "scheduled_tasks.toml"
     path.write_text("# a hand-written comment\n")
-    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", time="09:00", prompt="hi")
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
 
     append_scheduled_task(tmp_path, task)
 
     assert path.read_text().startswith("# a hand-written comment\n")
-    assert load_scheduled_tasks(tmp_path) == [task]
-
-
-def test_append_and_load_interval_based_task(tmp_path):
-    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", prompt="check in", every="2h")
-
-    append_scheduled_task(tmp_path, task)
-
-    assert load_scheduled_tasks(tmp_path) == [task]
-    assert 'every = "2h"' in (tmp_path / "scheduled_tasks.toml").read_text()
-    assert "time" not in (tmp_path / "scheduled_tasks.toml").read_text()
-
-
-def test_load_scheduled_tasks_requires_exactly_one_of_time_or_every(tmp_path):
-    path = tmp_path / "scheduled_tasks.toml"
-    path.write_text(
-        """
-        [[scheduled_tasks]]
-        platform = "discord"
-        channel_id = "1"
-        user_id = "1"
-        prompt = "hi"
-        """
-    )
-    with pytest.raises(ValueError):
-        load_scheduled_tasks(tmp_path)
-
-
-def test_load_scheduled_tasks_rejects_both_time_and_every(tmp_path):
-    path = tmp_path / "scheduled_tasks.toml"
-    path.write_text(
-        """
-        [[scheduled_tasks]]
-        platform = "discord"
-        channel_id = "1"
-        user_id = "1"
-        prompt = "hi"
-        time = "09:00"
-        every = "2h"
-        """
-    )
-    with pytest.raises(ValueError):
-        load_scheduled_tasks(tmp_path)
-
-
-def test_load_scheduled_tasks_rejects_invalid_every(tmp_path):
-    path = tmp_path / "scheduled_tasks.toml"
-    path.write_text(
-        """
-        [[scheduled_tasks]]
-        platform = "discord"
-        channel_id = "1"
-        user_id = "1"
-        prompt = "hi"
-        every = "not-a-duration"
-        """
-    )
-    with pytest.raises(ValueError):
-        load_scheduled_tasks(tmp_path)
-
-
-def test_append_and_load_weekly_task(tmp_path):
-    task = ScheduledTask(
-        platform="discord", channel_id="1", user_id="1", prompt="check in", time="19:00", weekday="thursday"
-    )
-
-    append_scheduled_task(tmp_path, task)
-
     assert load_scheduled_tasks(tmp_path) == [task]
 
 
@@ -241,8 +173,7 @@ def test_append_and_load_biweekly_task(tmp_path):
         channel_id="1",
         user_id="1",
         prompt="check in",
-        time="19:00",
-        weekday="thursday",
+        cron="0 19 * * 4",
         interval_weeks=2,
     )
 
@@ -253,7 +184,7 @@ def test_append_and_load_biweekly_task(tmp_path):
     assert load_scheduled_tasks(tmp_path) == [task]
 
 
-def test_load_scheduled_tasks_rejects_unknown_weekday(tmp_path):
+def test_load_scheduled_tasks_requires_cron(tmp_path):
     path = tmp_path / "scheduled_tasks.toml"
     path.write_text(
         """
@@ -262,15 +193,13 @@ def test_load_scheduled_tasks_rejects_unknown_weekday(tmp_path):
         channel_id = "1"
         user_id = "1"
         prompt = "hi"
-        time = "19:00"
-        weekday = "someday"
         """
     )
     with pytest.raises(ValueError):
         load_scheduled_tasks(tmp_path)
 
 
-def test_load_scheduled_tasks_rejects_weekday_combined_with_every(tmp_path):
+def test_load_scheduled_tasks_rejects_invalid_cron(tmp_path):
     path = tmp_path / "scheduled_tasks.toml"
     path.write_text(
         """
@@ -279,15 +208,14 @@ def test_load_scheduled_tasks_rejects_weekday_combined_with_every(tmp_path):
         channel_id = "1"
         user_id = "1"
         prompt = "hi"
-        every = "2h"
-        weekday = "thursday"
+        cron = "not a cron expression"
         """
     )
     with pytest.raises(ValueError):
         load_scheduled_tasks(tmp_path)
 
 
-def test_load_scheduled_tasks_rejects_interval_weeks_without_weekday(tmp_path):
+def test_load_scheduled_tasks_rejects_invalid_interval_weeks(tmp_path):
     path = tmp_path / "scheduled_tasks.toml"
     path.write_text(
         """
@@ -296,8 +224,8 @@ def test_load_scheduled_tasks_rejects_interval_weeks_without_weekday(tmp_path):
         channel_id = "1"
         user_id = "1"
         prompt = "hi"
-        time = "19:00"
-        interval_weeks = 2
+        cron = "0 19 * * 4"
+        interval_weeks = 0
         """
     )
     with pytest.raises(ValueError):

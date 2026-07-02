@@ -215,11 +215,9 @@ class Engine:
                 channel_id=msg.channel_id,
                 user_id=msg.user_id,
                 prompt=request.prompt,
-                time=request.time,
+                cron=request.cron,
                 timezone=request.timezone,
-                weekday=request.weekday,
                 interval_weeks=request.interval_weeks,
-                every=request.every,
             )
             try:
                 append_scheduled_task(self._scheduled_tasks_dir, task)
@@ -227,15 +225,9 @@ class Engine:
                 logger.exception("failed to append scheduled task")
                 notes.append("Couldn't schedule that: failed to save it.")
                 continue
-            if request.every:
-                notes.append(f"Scheduled every {request.every}.")
-            elif request.weekday:
-                cadence = "every week" if request.interval_weeks == 1 else f"every {request.interval_weeks} weeks"
-                when = f"{request.time} {request.timezone}".strip()
-                notes.append(f"Scheduled {cadence} on {request.weekday.capitalize()} at {when}.")
-            else:
-                when = f"{request.time} {request.timezone}".strip()
-                notes.append(f"Scheduled daily at {when}.")
+            cadence = "" if request.interval_weeks == 1 else f" (every {request.interval_weeks} weeks)"
+            when = f"'{request.cron}' {request.timezone}".strip()
+            notes.append(f"Scheduled {when}{cadence}.")
 
         note_text = "\n".join(notes)
         return f"{cleaned}\n\n{note_text}" if cleaned else note_text

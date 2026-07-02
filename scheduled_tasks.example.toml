@@ -1,34 +1,32 @@
 # scheduled_tasks.example.toml
 #
 # Optional. Fires a prompt into a specific channel's existing session on a
-# schedule and posts the reply proactively -- e.g. a nightly digest, or an
-# every-couple-hours check-in. Reuses that channel's conversation history
-# (via the agent's --resume), so it's skipped entirely if the channel has no
-# session yet. Repeat [[scheduled_tasks]] for more than one.
+# schedule and posts the reply proactively -- e.g. a nightly digest, or a
+# biweekly check-in. Reuses that channel's conversation history (via the
+# agent's --resume), so it's skipped entirely if the channel has no session
+# yet. Repeat [[scheduled_tasks]] for more than one.
 #
-# Each entry needs exactly one of:
-#   time = "HH:MM"   -- fires once a day at this time (24h, in `timezone` or
-#                       local time if unset). Naturally pairs with
-#                       [daily_reset] in pocketagent.toml: schedule it just
-#                       before that channel's reset time so the prompt still
-#                       sees that day's conversation before it's cleared.
-#                       Add `weekday` (below) to fire weekly instead of daily.
-#   every = "2h"      -- fires repeatedly on this interval starting from
-#                       whenever pocketagent (re)loads this entry, e.g. "30m",
-#                       "2h", "1d" (parsed the same way as the usage-limit
-#                       "resets in" countdown -- days/hours/minutes only, no
-#                       seconds). Not combinable with weekday/interval_weeks.
+# Each entry needs:
+#   cron = "0 21 * * *"   -- a standard 5-field cron expression (minute hour
+#                            day month weekday), evaluated in `timezone` (an
+#                            IANA name, or local time if unset). Examples:
+#                              "0 21 * * *"    -- every day at 21:00
+#                              "0 19 * * 4"    -- every Thursday at 19:00
+#                              "0 9 * * 1-5"   -- weekdays at 09:00
+#                              "0 0 1 * *"     -- midnight on the 1st of the month
+#                            A daily cron naturally pairs with [daily_reset]
+#                            in pocketagent.toml: schedule it just before
+#                            that channel's reset time so the prompt still
+#                            sees that day's conversation before it's cleared.
 #
-# `time` can optionally be paired with:
-#   weekday = "thursday"   -- fire once a week on this day instead of daily
-#                             (any weekday name, case-insensitive)
-#   interval_weeks = 2     -- with weekday set, fire every Nth week instead
-#                             of every week (2 = every other week, etc.);
-#                             defaults to 1. Anchored to a fixed reference
-#                             date, so which weeks are "on" stays the same
-#                             across restarts -- unlike `every`'s cadence,
-#                             which restarts counting from whenever the
-#                             entry is (re)loaded.
+# Optionally also:
+#   interval_weeks = 2   -- fire on only every Nth week the cron expression
+#                           matches (2 = every other week, etc.); defaults
+#                           to 1 (every matching week). Standard cron has no
+#                           native "every Nth week" -- this is a bolt-on
+#                           filter anchored to a fixed reference date, so
+#                           which weeks are "on" stays the same across
+#                           restarts.
 #
 # This file must be named scheduled_tasks.toml and live next to the main
 # pocketagent.toml passed via `-c`/`--config`. It's kept separate so it can
@@ -44,7 +42,7 @@
 # channel_id = "123456789012345678"
 # user_id = "234567890123456789"   # whose session to use (sessions are per
                                     # channel+user -- see session_key)
-# time = "21:00"
+# cron = "0 21 * * *"
 # timezone = ""                    # IANA name; omit to use the host's local timezone
 # prompt = "Summarize all new vocabulary words discussed in this channel today."
 
@@ -52,15 +50,7 @@
 # platform = "discord"
 # channel_id = "123456789012345678"
 # user_id = "234567890123456789"
-# every = "2h"                     # instead of time/timezone, for a recurring interval
-# prompt = "Check on the build and report status."
-
-# [[scheduled_tasks]]
-# platform = "discord"
-# channel_id = "123456789012345678"
-# user_id = "234567890123456789"
-# time = "19:00"
-# weekday = "thursday"             # fires weekly on this day instead of daily
+# cron = "0 19 * * 4"              # every Thursday at 19:00
 # interval_weeks = 2               # omit for every week; 2 = every other week
 # prompt = "Post the biweekly status update."
 
