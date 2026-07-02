@@ -1,9 +1,11 @@
+import pytest
+
 from pocketagent.config import AppConfig, PlatformConfig, build_reset_groups, load_config
 from pocketagent.core.commands import CommandRegistry
 from pocketagent.core.router import ChannelOverride
 
 
-def _config(daily_reset_time="", daily_reset_timezone="", **platforms_kwargs) -> AppConfig:
+def _config(daily_reset_cron="", daily_reset_timezone="", **platforms_kwargs) -> AppConfig:
     """platforms_kwargs maps platform name -> {"channels": {...}, "options": {...}}."""
 
     platforms = {
@@ -21,17 +23,17 @@ def _config(daily_reset_time="", daily_reset_timezone="", **platforms_kwargs) ->
         platforms=platforms,
         agent_options={},
         commands=CommandRegistry(),
-        daily_reset_time=daily_reset_time,
+        daily_reset_cron=daily_reset_cron,
         daily_reset_timezone=daily_reset_timezone,
     )
 
 
-def test_load_config_parses_channel_daily_reset_time(tmp_path):
+def test_load_config_parses_channel_daily_reset_cron(tmp_path):
     config_path = tmp_path / "pocketagent.toml"
     config_path.write_text(
         """
         [daily_reset]
-        time = "04:00"
+        cron = "0 4 * * *"
 
         [platforms.discord]
         token = "x"
@@ -39,7 +41,7 @@ def test_load_config_parses_channel_daily_reset_time(tmp_path):
         base_dir = "/tmp/ws"
 
         [platforms.discord.channels."111"]
-        daily_reset_time = "12:00"
+        daily_reset_cron = "0 12 * * *"
         daily_reset_timezone = "America/New_York"
         """
     )
@@ -47,8 +49,44 @@ def test_load_config_parses_channel_daily_reset_time(tmp_path):
     config = load_config(config_path)
 
     override = config.platforms["discord"].channels["111"]
-    assert override.daily_reset_time == "12:00"
+    assert override.daily_reset_cron == "0 12 * * *"
     assert override.daily_reset_timezone == "America/New_York"
+
+
+def test_load_config_rejects_invalid_daily_reset_cron(tmp_path):
+    config_path = tmp_path / "pocketagent.toml"
+    config_path.write_text(
+        """
+        [daily_reset]
+        cron = "not a cron expression"
+
+        [platforms.discord]
+        token = "x"
+        default_agent = "claude_code"
+        base_dir = "/tmp/ws"
+        """
+    )
+
+    with pytest.raises(ValueError):
+        load_config(config_path)
+
+
+def test_load_config_rejects_invalid_channel_daily_reset_cron(tmp_path):
+    config_path = tmp_path / "pocketagent.toml"
+    config_path.write_text(
+        """
+        [platforms.discord]
+        token = "x"
+        default_agent = "claude_code"
+        base_dir = "/tmp/ws"
+
+        [platforms.discord.channels."111"]
+        daily_reset_cron = "not a cron expression"
+        """
+    )
+
+    with pytest.raises(ValueError):
+        load_config(config_path)
 
 
 def test_load_config_parses_platform_daily_reset_exclude_channels(tmp_path):
@@ -56,7 +94,7 @@ def test_load_config_parses_platform_daily_reset_exclude_channels(tmp_path):
     config_path.write_text(
         """
         [daily_reset]
-        time = "04:00"
+        cron = "0 4 * * *"
 
         [platforms.discord]
         token = "x"
@@ -116,33 +154,33 @@ def test_build_reset_groups_no_config_returns_nothing():
 
 
 def test_build_reset_groups_global_default_only():
-    config = _config(daily_reset_time="04:00", daily_reset_timezone="UTC")
+    config = _config(daily_reset_cron="0 4 * * *", daily_reset_timezone="UTC")
     groups = build_reset_groups(config)
     assert len(groups) == 1
-    assert groups[0].time == "04:00"
+    assert groups[0].cron == "0 4 * * *"
     assert groups[0].channel_pairs is None
     assert groups[0].exclude == frozenset()
 
 
 def test_build_reset_groups_channel_override_excluded_from_global():
     config = _config(
-        daily_reset_time="04:00",
-        discord={"channels": {"111": ChannelOverride(daily_reset_time="12:00")}},
+        daily_reset_cron="0 4 * * *",
+        discord={"channels": {"111": ChannelOverride(daily_reset_cron="0 12 * * *")}},
     )
     groups = build_reset_groups(config)
 
     custom = next(g for g in groups if g.channel_pairs is not None)
     default = next(g for g in groups if g.channel_pairs is None)
 
-    assert custom.time == "12:00"
+    assert custom.cron == "0 12 * * *"
     assert custom.channel_pairs == {("discord", "111")}
     assert default.exclude == frozenset({("discord", "111")})
 
 
 def test_build_reset_groups_disabled_channel_excluded_with_no_custom_group():
     config = _config(
-        daily_reset_time="04:00",
-        discord={"channels": {"111": ChannelOverride(daily_reset_time="")}},
+        daily_reset_cron="0 4 * * *",
+        discord={"channels": {"111": ChannelOverride(daily_reset_cron="")}},
     )
     groups = build_reset_groups(config)
 
@@ -153,7 +191,7 @@ def test_build_reset_groups_disabled_channel_excluded_with_no_custom_group():
 
 def test_build_reset_groups_daily_reset_exclude_channels_list():
     config = _config(
-        daily_reset_time="04:00",
+        daily_reset_cron="0 4 * * *",
         discord={"options": {"daily_reset_exclude_channels": ["111", "222"]}},
     )
     groups = build_reset_groups(config)
@@ -165,11 +203,11 @@ def test_build_reset_groups_daily_reset_exclude_channels_list():
 
 def test_build_reset_groups_predicate_matches_only_assigned_channels():
     config = _config(
-        daily_reset_time="04:00",
+        daily_reset_cron="0 4 * * *",
         discord={
             "channels": {
-                "111": ChannelOverride(daily_reset_time="12:00"),
-                "222": ChannelOverride(daily_reset_time=""),
+                "111": ChannelOverride(daily_reset_cron="0 12 * * *"),
+                "222": ChannelOverride(daily_reset_cron=""),
             },
             "options": {"daily_reset_exclude_channels": ["333"]},
         },
@@ -186,5 +224,5 @@ def test_build_reset_groups_predicate_matches_only_assigned_channels():
 
     assert default_predicate("discord:444:1") is True  # uninvolved channel: default applies
     assert default_predicate("discord:111:1") is False  # has its own schedule
-    assert default_predicate("discord:222:1") is False  # explicitly disabled (daily_reset_time="")
+    assert default_predicate("discord:222:1") is False  # explicitly disabled (daily_reset_cron="")
     assert default_predicate("discord:333:1") is False  # listed in daily_reset_exclude_channels

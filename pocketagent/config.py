@@ -16,6 +16,7 @@ from .core.engine import Engine
 from .core.platform import Platform
 from .core.router import ChannelOverride, Router
 from .core.scheduled_tasks import ScheduledTask, load_scheduled_tasks
+from .core.scheduler import validate_cron
 from .core.session_store import SessionStore
 from .core.workspace import WorkspaceManager
 
@@ -36,7 +37,7 @@ class AppConfig:
     agent_options: dict[str, dict[str, Any]]
     commands: CommandRegistry
     config_dir: Path = Path(".")
-    daily_reset_time: str = ""
+    daily_reset_cron: str = ""
     daily_reset_timezone: str = ""
     scheduled_tasks: list[ScheduledTask] = field(default_factory=list)
 
@@ -52,16 +53,23 @@ def load_config(path: str | Path) -> AppConfig:
             raise ValueError(f"platforms.{name}: base_dir is required")
         if "default_agent" not in raw:
             raise ValueError(f"platforms.{name}: default_agent is required")
-        channels = {
-            str(channel_id): ChannelOverride(
+        channels = {}
+        for channel_id, channel_cfg in raw.get("channels", {}).items():
+            channel_cron = channel_cfg.get("daily_reset_cron")
+            if channel_cron:
+                try:
+                    validate_cron(channel_cron)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"platforms.{name}.channels.{channel_id!r}: daily_reset_cron: {exc}"
+                    ) from exc
+            channels[str(channel_id)] = ChannelOverride(
                 agent=channel_cfg.get("agent"),
                 workspace=channel_cfg.get("workspace"),
                 show_footer=channel_cfg.get("show_footer"),
-                daily_reset_time=channel_cfg.get("daily_reset_time"),
+                daily_reset_cron=channel_cron,
                 daily_reset_timezone=channel_cfg.get("daily_reset_timezone", ""),
             )
-            for channel_id, channel_cfg in raw.get("channels", {}).items()
-        }
         options = {k: v for k, v in raw.items() if k not in ("channels", "default_agent", "base_dir")}
         platforms[name] = PlatformConfig(
             name=name,
@@ -83,6 +91,12 @@ def load_config(path: str | Path) -> AppConfig:
         )
 
     daily_reset = data.get("daily_reset", {})
+    daily_reset_cron = daily_reset.get("cron", "")
+    if daily_reset_cron:
+        try:
+            validate_cron(daily_reset_cron)
+        except ValueError as exc:
+            raise ValueError(f"[daily_reset]: {exc}") from exc
 
     config_dir = Path(path).parent
     scheduled_tasks = load_scheduled_tasks(config_dir)
@@ -93,7 +107,7 @@ def load_config(path: str | Path) -> AppConfig:
         agent_options=data.get("agents", {}),
         commands=commands,
         config_dir=config_dir,
-        daily_reset_time=daily_reset.get("time", ""),
+        daily_reset_cron=daily_reset_cron,
         daily_reset_timezone=daily_reset.get("timezone", ""),
         scheduled_tasks=scheduled_tasks,
     )
@@ -101,16 +115,16 @@ def load_config(path: str | Path) -> AppConfig:
 
 @dataclass
 class ResetGroup:
-    """One daily-reset firing time, and which channels it clears.
+    """One daily-reset cron schedule, and which channels it clears.
 
-    channel_pairs=None means "every channel without its own daily_reset_time
+    channel_pairs=None means "every channel without its own daily_reset_cron
     override and not listed in daily_reset_exclude_channels" (the app-wide
     [daily_reset] default); exclude then lists the (platform, channel_id)
     pairs carved out by an override or exclude list so the default doesn't
     also clear them on its own schedule.
     """
 
-    time: str
+    cron: str
     timezone: str
     channel_pairs: set[tuple[str, str]] | None
     exclude: frozenset[tuple[str, str]] = frozenset()
@@ -125,9 +139,9 @@ class ResetGroup:
 
 def build_reset_groups(config: AppConfig) -> list[ResetGroup]:
     """Turn the app-wide [daily_reset] default plus any per-platform
-    daily_reset_exclude_channels list and per-channel daily_reset_time
-    overrides into a list of (time, timezone) -> channels groups, each
-    driving one DailyScheduler.
+    daily_reset_exclude_channels list and per-channel daily_reset_cron
+    overrides into a list of (cron, timezone) -> channels groups, each
+    driving one CronScheduler.
     """
 
     overridden: set[tuple[str, str]] = set()
@@ -137,22 +151,22 @@ def build_reset_groups(config: AppConfig) -> list[ResetGroup]:
             overridden.add((platform_name, str(channel_id)))
 
         for channel_id, override in platform_cfg.channels.items():
-            if override.daily_reset_time is None:
+            if override.daily_reset_cron is None:
                 continue  # inherits the app-wide default
             pair = (platform_name, channel_id)
             overridden.add(pair)
-            if not override.daily_reset_time:
+            if not override.daily_reset_cron:
                 continue  # explicit "" also disables the daily reset for this channel
-            key = (override.daily_reset_time, override.daily_reset_timezone)
+            key = (override.daily_reset_cron, override.daily_reset_timezone)
             custom.setdefault(key, set()).add(pair)
 
     groups = [
-        ResetGroup(time=t, timezone=tz, channel_pairs=pairs) for (t, tz), pairs in custom.items()
+        ResetGroup(cron=c, timezone=tz, channel_pairs=pairs) for (c, tz), pairs in custom.items()
     ]
-    if config.daily_reset_time:
+    if config.daily_reset_cron:
         groups.append(
             ResetGroup(
-                time=config.daily_reset_time,
+                cron=config.daily_reset_cron,
                 timezone=config.daily_reset_timezone,
                 channel_pairs=None,
                 exclude=frozenset(overridden),

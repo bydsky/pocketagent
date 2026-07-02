@@ -3,12 +3,14 @@
 # State (session resume ids) is kept under state_dir.
 state_dir = "~/.pocketagent"
 
-# Optional: reset every channel's conversation once a day at a fixed time --
-# the next message on each channel starts a brand-new agent session instead
-# of resuming, like running the agent CLI's own `/clear` everywhere at once.
-# Omit [daily_reset] (or leave time unset) to disable.
+# Optional: reset every channel's conversation on a schedule -- the next
+# message on each channel starts a brand-new agent session instead of
+# resuming, like running the agent CLI's own `/clear` everywhere at once.
+# Omit [daily_reset] (or leave cron unset) to disable.
 # [daily_reset]
-# time = "04:00"             # 24h "HH:MM", in `timezone` (or local time if unset)
+# cron = "0 4 * * *"             # standard 5-field cron expression, evaluated
+                                   # in `timezone` (or local time if unset) --
+                                   # e.g. "0 4 * * *" for daily at 4am
 # timezone = "America/New_York"  # IANA name; omit to use the host's local timezone
 
 # Optional: fire a prompt into a specific channel's existing session once a
@@ -17,7 +19,7 @@ state_dir = "~/.pocketagent"
 # scheduled_tasks.example.toml -- so it's kept apart from this file's
 # platform tokens/secrets and can be hot-reloaded on its own.
 
-# Changes to [daily_reset] and per-channel daily_reset_time/daily_reset_timezone
+# Changes to [daily_reset] and per-channel daily_reset_cron/daily_reset_timezone
 # above take effect without a restart: send the running process SIGHUP (e.g.
 # `kill -HUP <pid>`) and it re-reads this file and rebuilds just the
 # daily-reset schedules. scheduled_tasks.toml doesn't need SIGHUP -- it's
@@ -42,7 +44,7 @@ base_dir = "~/pocketagent-workspaces/discord"
 # daily_reset_exclude_channels = ["123456789012345678"]  # channel IDs on this
                                 # platform that never get the app-wide
                                 # [daily_reset] above (a channel can still opt
-                                # into its own schedule via daily_reset_time
+                                # into its own schedule via daily_reset_cron
                                 # below instead of being excluded)
 # Applied to every channel on this platform, combined with the handling
 # agent's own agent_system_prompt below (claude_code: both joined and sent
@@ -66,11 +68,12 @@ platform_system_prompt = """
 agent = "claude_code"
 workspace = "support-bot"    # fixed folder name instead of the channel's own name
 # show_footer = true         # turn on the footer just for this channel
-# daily_reset_time = "12:00"      # give this channel its own daily reset time
-                                   # instead of the app-wide [daily_reset] one
-                                   # (to exclude a channel entirely instead, list
-                                   # it in daily_reset_exclude_channels above)
-# daily_reset_timezone = ""       # IANA name for daily_reset_time; omit to use
+# daily_reset_cron = "0 12 * * *"  # give this channel its own daily-reset
+                                   # cron schedule instead of the app-wide
+                                   # [daily_reset] one (to exclude a channel
+                                   # entirely instead, list it in
+                                   # daily_reset_exclude_channels above)
+# daily_reset_timezone = ""       # IANA name for daily_reset_cron; omit to use
                                    # the host's local timezone
 
 [platforms.telegram]

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import build_app, build_reset_groups, load_config
 from .core.scheduled_tasks import SCHEDULED_TASKS_FILENAME, load_scheduled_tasks, run_scheduled_task
-from .core.scheduler import CronScheduler, DailyScheduler
+from .core.scheduler import CronScheduler
 
 SCHEDULED_TASKS_POLL_INTERVAL = 30.0
 
@@ -28,14 +28,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_reset_schedulers(config, engine) -> list[DailyScheduler]:
+def _build_reset_schedulers(config, engine) -> list[CronScheduler]:
     def _make_callback(predicate):
         return lambda: engine.clear_sessions(predicate)
 
-    return [
-        DailyScheduler(group.time, _make_callback(group.predicate()), group.timezone)
-        for group in build_reset_groups(config)
-    ]
+    schedulers: list[CronScheduler] = []
+    for group in build_reset_groups(config):
+        try:
+            schedulers.append(CronScheduler(group.cron, _make_callback(group.predicate()), group.timezone))
+        except ValueError:
+            logging.warning("daily_reset: invalid cron %r, skipping", group.cron)
+    return schedulers
 
 
 def _build_task_schedulers(scheduled_tasks, platforms, engine) -> list[CronScheduler]:
@@ -56,11 +59,11 @@ def _build_task_schedulers(scheduled_tasks, platforms, engine) -> list[CronSched
     return schedulers
 
 
-async def _reload_reset_schedulers(config_path: str, engine, schedulers: list[DailyScheduler]) -> None:
+async def _reload_reset_schedulers(config_path: str, engine, schedulers: list[CronScheduler]) -> None:
     """Re-read `config_path` and swap in daily-reset schedulers built from it.
 
     Triggered by SIGHUP, since picking up [daily_reset] and per-channel
-    daily_reset_time overrides means re-reading the main config file
+    daily_reset_cron overrides means re-reading the main config file
     (platform tokens and all), unlike scheduled_tasks.toml which is watched
     automatically -- see `_watch_scheduled_tasks_file`.
     """

@@ -25,12 +25,12 @@ class ChannelOverride:
     workspace: str | None = None
     show_footer: bool | None = None
     # Per-channel daily-reset override (see config.build_reset_groups): None
-    # inherits the app-wide [daily_reset] default; any "HH:MM" string gives
-    # this channel its own reset time, paired with daily_reset_timezone.
+    # inherits the app-wide [daily_reset] default; any cron expression gives
+    # this channel its own reset schedule, paired with daily_reset_timezone.
     # Plain exclusion is a platform-level list instead -- see
     # daily_reset_exclude_channels under [platforms.<name>] in
     # config.example.toml.
-    daily_reset_time: str | None = None
+    daily_reset_cron: str | None = None
     daily_reset_timezone: str = ""
 
 

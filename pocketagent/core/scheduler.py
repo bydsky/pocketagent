@@ -1,4 +1,8 @@
-"""Runs a callback once per day at a configured local time (e.g. daily session reset)."""
+"""Runs a callback on a schedule -- a cron expression (CronScheduler, e.g. for
+daily session resets and scheduled_tasks.toml entries) or a specific absolute
+instant once (OneShotScheduler, e.g. a usage-limit retry timer). next_occurrence
+is also reused standalone by claude_code.py to parse a usage-limit denial's
+own "resets HH:MM" wording into an absolute instant."""
 
 from __future__ import annotations
 
@@ -19,13 +23,6 @@ logger = logging.getLogger(__name__)
 # bolt-on filter applied on top of whichever weeks the cron expression's own
 # day-of-week field already matches.
 _WEEK_EPOCH = date(2024, 1, 1)
-
-
-def parse_time_of_day(value: str) -> dt_time:
-    """Parse "HH:MM" (24h) into a time object."""
-
-    hour_str, _, minute_str = value.partition(":")
-    return dt_time(hour=int(hour_str), minute=int(minute_str or "0"))
 
 
 def validate_cron(expr: str) -> None:
@@ -57,13 +54,6 @@ def next_occurrence(target: dt_time, tz: ZoneInfo | None, now: datetime | None =
     if next_run <= now:
         next_run += timedelta(days=1)
     return next_run
-
-
-def seconds_until_next(target: dt_time, tz: ZoneInfo | None, now: datetime | None = None) -> float:
-    """Seconds from `now` until the next occurrence of `target` time-of-day, today or tomorrow."""
-
-    now = now if now is not None else (datetime.now(tz) if tz is not None else datetime.now())
-    return (next_occurrence(target, tz, now) - now).total_seconds()
 
 
 def _weeks_since_epoch(d: date) -> int:
@@ -101,54 +91,17 @@ def seconds_until_next_cron(
     return (next_cron_occurrence(expr, interval_weeks, tz, now) - now).total_seconds()
 
 
-class DailyScheduler:
-    """Sleeps until a configured time-of-day, then awaits callback() -- every day, forever."""
-
-    def __init__(
-        self,
-        time_str: str,
-        callback: Callable[[], Awaitable[None]],
-        timezone: str = "",
-    ) -> None:
-        self._target = parse_time_of_day(time_str)
-        self._tz = resolve_timezone(timezone)
-        self._callback = callback
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run())
-
-    async def stop(self) -> None:
-        if self._task is None:
-            return
-        self._task.cancel()
-        try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-
-    async def _run(self) -> None:
-        while True:
-            delay = seconds_until_next(self._target, self._tz)
-            logger.info("next daily run in %.0fs", delay)
-            await asyncio.sleep(delay)
-            try:
-                await self._callback()
-            except Exception:
-                logger.exception("daily scheduler callback failed")
-
-
 class CronScheduler:
     """Sleeps until the next occurrence of a 5-field cron expression, then
     awaits callback() -- forever, optionally restricted to every
     `interval_weeks` weeks (1 = every matching week, 2 = every other, etc.).
 
-    Like DailyScheduler, each iteration recomputes the next matching instant
-    from the current wall-clock time rather than adding a fixed offset, so
-    it self-corrects across DST changes; interval_weeks parity is anchored
-    to a fixed reference date (see _WEEK_EPOCH) rather than to whenever
-    start() happened to be called, so which weeks are "on" doesn't drift or
-    reset across restarts.
+    Each iteration recomputes the next matching instant from the current
+    wall-clock time rather than adding a fixed offset, so it self-corrects
+    across DST changes; interval_weeks parity is anchored to a fixed
+    reference date (see _WEEK_EPOCH) rather than to whenever start()
+    happened to be called, so which weeks are "on" doesn't drift or reset
+    across restarts.
     """
 
     def __init__(
@@ -191,10 +144,11 @@ class CronScheduler:
 class OneShotScheduler:
     """Sleeps until a specific absolute instant, then awaits callback() once.
 
-    Unlike DailyScheduler, reschedule() can push the firing time later (e.g. a
-    fresher signal reports a later reset) without losing whatever's already
-    waiting on it; it's a no-op if the new time isn't later than the current
-    one, so an earlier (more conservative) deadline is never shortened.
+    Unlike the recurring schedulers above, reschedule() can push the firing
+    time later (e.g. a fresher signal reports a later reset) without losing
+    whatever's already waiting on it; it's a no-op if the new time isn't
+    later than the current one, so an earlier (more conservative) deadline
+    is never shortened.
     """
 
     def __init__(self, run_at: datetime, callback: Callable[[], Awaitable[None]]) -> None:
