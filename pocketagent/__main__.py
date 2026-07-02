@@ -10,9 +10,12 @@ from pathlib import Path
 
 from .config import build_app, build_reset_groups, load_config
 from .core.scheduled_tasks import SCHEDULED_TASKS_FILENAME, load_scheduled_tasks, run_scheduled_task
-from .core.scheduler import DailyScheduler
+from .core.scheduler import DailyScheduler, IntervalScheduler
+from .core.utils import parse_relative_duration
 
 SCHEDULED_TASKS_POLL_INTERVAL = 30.0
+
+TaskScheduler = DailyScheduler | IntervalScheduler
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -38,17 +41,25 @@ def _build_reset_schedulers(config, engine) -> list[DailyScheduler]:
     ]
 
 
-def _build_task_schedulers(scheduled_tasks, platforms, engine) -> list[DailyScheduler]:
+def _build_task_schedulers(scheduled_tasks, platforms, engine) -> list[TaskScheduler]:
     def _make_task_callback(platform, task):
         return lambda: run_scheduled_task(engine, platform, task.channel_id, task.user_id, task.prompt)
 
-    schedulers = []
+    schedulers: list[TaskScheduler] = []
     for task in scheduled_tasks:
         platform = platforms.get(task.platform)
         if platform is None:
             logging.warning("scheduled_tasks: unknown platform '%s', skipping", task.platform)
             continue
-        schedulers.append(DailyScheduler(task.time, _make_task_callback(platform, task), task.timezone))
+        callback = _make_task_callback(platform, task)
+        if task.every:
+            interval = parse_relative_duration(task.every)
+            if interval is None:
+                logging.warning("scheduled_tasks: invalid 'every' %r, skipping", task.every)
+                continue
+            schedulers.append(IntervalScheduler(interval, callback))
+        else:
+            schedulers.append(DailyScheduler(task.time, callback, task.timezone))
     return schedulers
 
 
@@ -75,7 +86,7 @@ async def _reload_reset_schedulers(config_path: str, engine, schedulers: list[Da
     logging.info("daily_reset schedule reloaded (%d schedulers)", len(schedulers))
 
 
-async def _reload_task_schedulers(config_dir: Path, platforms, engine, schedulers: list[DailyScheduler]) -> None:
+async def _reload_task_schedulers(config_dir: Path, platforms, engine, schedulers: list[TaskScheduler]) -> None:
     try:
         scheduled_tasks = load_scheduled_tasks(config_dir)
     except Exception:
@@ -94,7 +105,7 @@ async def _watch_scheduled_tasks_file(
     config_dir: Path,
     platforms,
     engine,
-    schedulers: list[DailyScheduler],
+    schedulers: list[TaskScheduler],
     poll_interval: float = SCHEDULED_TASKS_POLL_INTERVAL,
 ) -> None:
     """Poll scheduled_tasks.toml's mtime and reload its schedulers on change.

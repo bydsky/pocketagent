@@ -262,6 +262,50 @@ async def test_on_message_schedule_task_error_shown_and_nothing_written(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_on_message_writes_interval_scheduled_task_and_shows_confirmation(tmp_path):
+    class _SchedulingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content=(
+                    "Sure, I'll check in every couple hours.\n\n"
+                    '```schedule-task\nevery = "2h"\nprompt = "Check on the build."\n```'
+                ),
+                done=True,
+            )
+
+    class _SchedulingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _SchedulingAgentSession()
+
+    agent = _SchedulingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert "schedule-task" not in platform.replies[0]
+    assert "Scheduled every 2h." in platform.replies[0]
+
+    from pocketagent.core.scheduled_tasks import load_scheduled_tasks
+
+    tasks = load_scheduled_tasks(tmp_path)
+    assert len(tasks) == 1
+    assert tasks[0].every == "2h"
+    assert tasks[0].time == ""
+    assert tasks[0].prompt == "Check on the build."
+
+
+@pytest.mark.asyncio
 async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
     class _AgentSessionWithUsage(_FakeAgentSession):
         async def events(self) -> AsyncIterator[Event]:

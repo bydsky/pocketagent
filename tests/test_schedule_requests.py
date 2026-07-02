@@ -72,3 +72,29 @@ def test_extract_non_string_time_returns_error():
     text = "```schedule-task\ntime = 900\nprompt = \"hi\"\n```"
     cleaned, requests = extract_schedule_requests(text)
     assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_valid_every_block():
+    text = '```schedule-task\nevery = "2h"\nprompt = "Check on the build."\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert cleaned == ""
+    assert requests == [ScheduleRequest(every="2h", prompt="Check on the build.")]
+
+
+def test_extract_every_and_time_together_returns_error():
+    text = '```schedule-task\ntime = "09:00"\nevery = "2h"\nprompt = "hi"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_neither_time_nor_every_returns_error():
+    text = '```schedule-task\nprompt = "hi"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_invalid_every_returns_error():
+    text = '```schedule-task\nevery = "not-a-duration"\nprompt = "hi"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+    assert "not-a-duration" in requests[0].detail

@@ -5,6 +5,7 @@ import pytest
 
 from pocketagent.core.scheduler import (
     DailyScheduler,
+    IntervalScheduler,
     OneShotScheduler,
     next_occurrence,
     parse_time_of_day,
@@ -127,6 +128,46 @@ async def test_daily_scheduler_keeps_running_after_callback_raises(monkeypatch):
     )
 
     scheduler = DailyScheduler("04:00", flaky_callback)
+    scheduler.start()
+    for _ in range(5):
+        await asyncio.sleep(0)
+        if len(calls) >= 2:
+            break
+
+    assert len(calls) >= 2
+
+    await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_interval_scheduler_runs_callback_repeatedly_and_can_be_stopped():
+    calls = []
+
+    async def callback():
+        calls.append(1)
+
+    scheduler = IntervalScheduler(timedelta(seconds=0), callback)
+    scheduler.start()
+    for _ in range(5):
+        await asyncio.sleep(0)
+        if len(calls) >= 2:
+            break
+
+    assert len(calls) >= 2
+
+    await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_interval_scheduler_keeps_running_after_callback_raises():
+    calls = []
+
+    async def flaky_callback():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+
+    scheduler = IntervalScheduler(timedelta(seconds=0), flaky_callback)
     scheduler.start()
     for _ in range(5):
         await asyncio.sleep(0)

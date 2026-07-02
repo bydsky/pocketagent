@@ -7,6 +7,13 @@
     prompt = "Check on the build and report status."
     ```
 
+or, for a recurring interval instead of a fixed daily time:
+
+    ```schedule-task
+    every = "2h"
+    prompt = "Check on the build and report status."
+    ```
+
 Engine (core/engine.py) strips any such block out of the reply text before
 it's sent to the platform and appends the parsed task to scheduled_tasks.toml
 (core/scheduled_tasks.py) -- with platform/channel_id/user_id filled in from
@@ -22,13 +29,15 @@ import tomllib
 from dataclasses import dataclass
 
 from .scheduler import parse_time_of_day
+from .utils import parse_relative_duration
 
 _BLOCK_RE = re.compile(r"```schedule-task\s*\n(.*?)```", re.DOTALL)
 
 SCHEDULE_TASK_INSTRUCTIONS = """\
 If the user asks to be reminded of something, or wants you to check on or \
-run something once a day going forward, you can schedule it yourself by \
-including a fenced code block anywhere in your reply, exactly like this:
+run something on a recurring basis going forward, you can schedule it \
+yourself by including a fenced code block anywhere in your reply, exactly \
+like one of these:
 
 ```schedule-task
 time = "HH:MM"
@@ -36,19 +45,27 @@ timezone = ""
 prompt = "..."
 ```
 
-`time` (24h "HH:MM") and `prompt` (what to send yourself at that time,
-reusing this conversation's history) are required; `timezone` is an IANA
-name and may be omitted to use the local timezone. Only include this block
-when the user actually wants something scheduled -- it will be removed from
-what the user sees and replaced with a confirmation, so don't also describe
-its syntax to them."""
+```schedule-task
+every = "2h"
+prompt = "..."
+```
+
+`prompt` (what to send yourself, reusing this conversation's history) is
+always required, plus exactly one of: `time` (24h "HH:MM", for once a day --
+`timezone` is an IANA name and may be omitted to use the local timezone) or
+`every` (a recurring interval such as "30m", "2h", or "1d", for repeating
+every that often starting from now). Only include this block when the user
+actually wants something scheduled -- it will be removed from what the user
+sees and replaced with a confirmation, so don't also describe its syntax to
+them."""
 
 
 @dataclass
 class ScheduleRequest:
-    time: str
     prompt: str
+    time: str = ""
     timezone: str = ""
+    every: str = ""
 
 
 @dataclass
@@ -80,10 +97,24 @@ def _parse_block(body: str) -> ScheduleRequest | ScheduleRequestError:
     except tomllib.TOMLDecodeError as exc:
         return ScheduleRequestError(f"invalid schedule-task block ({exc})")
 
-    time_str = data.get("time")
     prompt = data.get("prompt")
-    if not isinstance(time_str, str) or not time_str or not isinstance(prompt, str) or not prompt:
-        return ScheduleRequestError("schedule-task block needs both 'time' and 'prompt' as strings")
+    if not isinstance(prompt, str) or not prompt:
+        return ScheduleRequestError("schedule-task block needs a 'prompt' as a string")
+
+    time_str = data.get("time", "")
+    every = data.get("every", "")
+    if not isinstance(time_str, str) or not isinstance(every, str):
+        return ScheduleRequestError("schedule-task block's 'time'/'every' must be strings")
+    if bool(time_str) == bool(every):
+        return ScheduleRequestError("schedule-task block needs exactly one of 'time' (daily) or 'every' (interval)")
+
+    if every:
+        if parse_relative_duration(every) is None:
+            return ScheduleRequestError(
+                f'schedule-task block has an invalid "every" {every!r} (expected e.g. "2h", "30m", "1d")'
+            )
+        return ScheduleRequest(prompt=prompt, every=every)
+
     try:
         parse_time_of_day(time_str)
     except ValueError:

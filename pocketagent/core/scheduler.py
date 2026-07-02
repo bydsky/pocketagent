@@ -84,6 +84,40 @@ class DailyScheduler:
                 logger.exception("daily scheduler callback failed")
 
 
+class IntervalScheduler:
+    """Runs callback() repeatedly, every `interval`, forever.
+
+    Unlike DailyScheduler (a fixed time-of-day), the first firing is
+    `interval` after start() is called, not at some absolute clock time --
+    e.g. an every="2h" task started at 10:15 next fires at 12:15, 14:15, ...
+    """
+
+    def __init__(self, interval: timedelta, callback: Callable[[], Awaitable[None]]) -> None:
+        self._interval = interval
+        self._callback = callback
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+
+    async def _run(self) -> None:
+        while True:
+            await asyncio.sleep(self._interval.total_seconds())
+            try:
+                await self._callback()
+            except Exception:
+                logger.exception("interval scheduler callback failed")
+
+
 class OneShotScheduler:
     """Sleeps until a specific absolute instant, then awaits callback() once.
 

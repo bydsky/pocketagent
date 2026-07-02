@@ -1,6 +1,7 @@
-"""Fires a configured prompt into an existing channel session once a day,
+"""Fires a configured prompt into an existing channel session on a schedule,
 posting the reply proactively instead of in response to an inbound message --
-e.g. a nightly "summarize today's new vocabulary" digest.
+e.g. a nightly "summarize today's new vocabulary" digest, or an
+every-N-hours check-in.
 
 Reuses Engine.on_message end-to-end (session locking, footer, the
 usage-limit backlog) by constructing a synthetic Message whose reply_ctx
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .types import Message
+from .utils import parse_relative_duration
 
 if TYPE_CHECKING:
     from .engine import Engine
@@ -29,19 +31,25 @@ SCHEDULED_TASKS_FILENAME = "scheduled_tasks.toml"
 
 @dataclass
 class ScheduledTask:
-    """A prompt fired into one (platform, channel_id, user_id) session once a
-    day, with the reply posted proactively to that channel. Naturally pairs
-    with [daily_reset] (config.py): schedule the task for just before the
-    channel's reset time so the prompt still sees that day's conversation
-    before it's cleared.
+    """A prompt fired into one (platform, channel_id, user_id) session on a
+    schedule, with the reply posted proactively to that channel. Exactly one
+    of `time` (a fixed daily "HH:MM", paired with `timezone`) or `every` (a
+    recurring interval like "2h"/"30m"/"1d", parsed by
+    core.utils.parse_relative_duration) must be set -- see
+    `_build_task_schedulers` in `__main__.py` for which of DailyScheduler /
+    IntervalScheduler that becomes. A daily task naturally pairs with
+    [daily_reset] (config.py): schedule it for just before the channel's
+    reset time so the prompt still sees that day's conversation before it's
+    cleared.
     """
 
     platform: str
     channel_id: str
     user_id: str
-    time: str
     prompt: str
+    time: str = ""
     timezone: str = ""
+    every: str = ""
 
 
 def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
@@ -56,17 +64,33 @@ def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
     if not path.exists():
         return []
     data = tomllib.loads(path.read_text())
-    return [
-        ScheduledTask(
-            platform=raw["platform"],
-            channel_id=str(raw["channel_id"]),
-            user_id=str(raw["user_id"]),
-            time=raw["time"],
-            prompt=raw["prompt"],
-            timezone=raw.get("timezone", ""),
+    tasks = []
+    for raw in data.get("scheduled_tasks", []):
+        time_str = raw.get("time", "")
+        every = raw.get("every", "")
+        channel_id = str(raw["channel_id"])
+        if bool(time_str) == bool(every):
+            raise ValueError(
+                f"scheduled_tasks: entry for channel_id={channel_id!r} needs exactly "
+                "one of 'time' (daily) or 'every' (interval)"
+            )
+        if every and parse_relative_duration(every) is None:
+            raise ValueError(
+                f"scheduled_tasks: entry for channel_id={channel_id!r} has an invalid "
+                f"'every' {every!r} (expected e.g. \"2h\", \"30m\", \"1d\")"
+            )
+        tasks.append(
+            ScheduledTask(
+                platform=raw["platform"],
+                channel_id=channel_id,
+                user_id=str(raw["user_id"]),
+                prompt=raw["prompt"],
+                time=time_str,
+                timezone=raw.get("timezone", ""),
+                every=every,
+            )
         )
-        for raw in data.get("scheduled_tasks", [])
-    ]
+    return tasks
 
 
 def _toml_string(value: str) -> str:
@@ -86,10 +110,13 @@ def format_scheduled_task_toml(task: ScheduledTask) -> str:
         f"platform = {_toml_string(task.platform)}",
         f"channel_id = {_toml_string(task.channel_id)}",
         f"user_id = {_toml_string(task.user_id)}",
-        f"time = {_toml_string(task.time)}",
     ]
-    if task.timezone:
-        lines.append(f"timezone = {_toml_string(task.timezone)}")
+    if task.every:
+        lines.append(f"every = {_toml_string(task.every)}")
+    else:
+        lines.append(f"time = {_toml_string(task.time)}")
+        if task.timezone:
+            lines.append(f"timezone = {_toml_string(task.timezone)}")
     lines.append(f"prompt = {_toml_string(task.prompt)}")
     return "\n".join(lines) + "\n"
 

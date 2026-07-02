@@ -165,3 +165,61 @@ def test_append_scheduled_task_preserves_existing_file_content(tmp_path):
 
     assert path.read_text().startswith("# a hand-written comment\n")
     assert load_scheduled_tasks(tmp_path) == [task]
+
+
+def test_append_and_load_interval_based_task(tmp_path):
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", prompt="check in", every="2h")
+
+    append_scheduled_task(tmp_path, task)
+
+    assert load_scheduled_tasks(tmp_path) == [task]
+    assert 'every = "2h"' in (tmp_path / "scheduled_tasks.toml").read_text()
+    assert "time" not in (tmp_path / "scheduled_tasks.toml").read_text()
+
+
+def test_load_scheduled_tasks_requires_exactly_one_of_time_or_every(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)
+
+
+def test_load_scheduled_tasks_rejects_both_time_and_every(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        time = "09:00"
+        every = "2h"
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)
+
+
+def test_load_scheduled_tasks_rejects_invalid_every(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        every = "not-a-duration"
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)

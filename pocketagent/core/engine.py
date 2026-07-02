@@ -214,9 +214,10 @@ class Engine:
                 platform=msg.platform,
                 channel_id=msg.channel_id,
                 user_id=msg.user_id,
-                time=request.time,
                 prompt=request.prompt,
+                time=request.time,
                 timezone=request.timezone,
+                every=request.every,
             )
             try:
                 append_scheduled_task(self._scheduled_tasks_dir, task)
@@ -224,8 +225,11 @@ class Engine:
                 logger.exception("failed to append scheduled task")
                 notes.append("Couldn't schedule that: failed to save it.")
                 continue
-            when = f"{request.time} {request.timezone}".strip()
-            notes.append(f"Scheduled daily at {when}.")
+            if request.every:
+                notes.append(f"Scheduled every {request.every}.")
+            else:
+                when = f"{request.time} {request.timezone}".strip()
+                notes.append(f"Scheduled daily at {when}.")
 
         note_text = "\n".join(notes)
         return f"{cleaned}\n\n{note_text}" if cleaned else note_text

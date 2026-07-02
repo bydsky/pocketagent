@@ -1,12 +1,22 @@
 # scheduled_tasks.example.toml
 #
-# Optional. Fires a prompt into a specific channel's existing session once a
-# day and posts the reply proactively -- e.g. a nightly digest. Reuses that
-# channel's conversation history (via the agent's --resume), so it's skipped
-# entirely if the channel has no session yet. Repeat [[scheduled_tasks]] for
-# more than one. Schedule it just before that channel's daily_reset time (if
-# any, see [daily_reset] in pocketagent.toml) so the prompt still sees that
-# day's conversation before it's cleared.
+# Optional. Fires a prompt into a specific channel's existing session on a
+# schedule and posts the reply proactively -- e.g. a nightly digest, or an
+# every-couple-hours check-in. Reuses that channel's conversation history
+# (via the agent's --resume), so it's skipped entirely if the channel has no
+# session yet. Repeat [[scheduled_tasks]] for more than one.
+#
+# Each entry needs exactly one of:
+#   time = "HH:MM"   -- fires once a day at this time (24h, in `timezone` or
+#                       local time if unset). Naturally pairs with
+#                       [daily_reset] in pocketagent.toml: schedule it just
+#                       before that channel's reset time so the prompt still
+#                       sees that day's conversation before it's cleared.
+#   every = "2h"      -- fires repeatedly on this interval starting from
+#                       whenever pocketagent (re)loads this entry, e.g. "30m",
+#                       "2h", "1d" (parsed the same way as the usage-limit
+#                       "resets in" countdown -- days/hours/minutes only, no
+#                       seconds).
 #
 # This file must be named scheduled_tasks.toml and live next to the main
 # pocketagent.toml passed via `-c`/`--config`. It's kept separate so it can
@@ -25,6 +35,13 @@
 # time = "21:00"
 # timezone = ""                    # IANA name; omit to use the host's local timezone
 # prompt = "Summarize all new vocabulary words discussed in this channel today."
+
+# [[scheduled_tasks]]
+# platform = "discord"
+# channel_id = "123456789012345678"
+# user_id = "234567890123456789"
+# every = "2h"                     # instead of time/timezone, for a recurring interval
+# prompt = "Check on the build and report status."
 
 # Entries here don't have to be hand-written: an agent can add one itself,
 # mid-conversation, by including a fenced ```schedule-task``` block in its
