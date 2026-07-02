@@ -9,12 +9,18 @@ from pathlib import Path
 from typing import Callable
 
 from .agent import Agent
-from .commands import CommandRegistry
+from .commands import CommandRegistry, parse_command_text
 from .platform import Platform
 from .utils import format_duration, parse_relative_duration
 from .router import ResolvedRoute, Router
-from .schedule_requests import SCHEDULE_TASK_INSTRUCTIONS, ScheduleRequestError, extract_schedule_requests
-from .scheduled_tasks import ScheduledTask, append_scheduled_task
+from .schedule_requests import (
+    SCHEDULE_TASK_INSTRUCTIONS,
+    ScheduleRequestError,
+    extract_list_task_requests,
+    extract_remove_task_requests,
+    extract_schedule_requests,
+)
+from .scheduled_tasks import ScheduledTask, append_scheduled_task, load_scheduled_tasks, remove_scheduled_task
 from .scheduler import OneShotScheduler
 from .session_store import SessionStore
 from .types import Event, EventType, Message
@@ -119,7 +125,28 @@ class Engine:
         async with lock:
             await self._handle_locked(platform, msg, route)
 
+    # Names of the built-in /scheduled and /unschedule commands (see
+    # _handle_locked) -- not configurable, but a user's own custom command
+    # of the same name takes precedence (checked via self.commands.resolve).
+    _LIST_SCHEDULED_COMMAND = "scheduled"
+    _UNSCHEDULE_COMMAND = "unschedule"
+
     async def _handle_locked(self, platform: Platform, msg: Message, route: ResolvedRoute) -> None:
+        parsed_command = parse_command_text(msg.content)
+        if parsed_command is not None:
+            name, args = parsed_command
+            if name == self._LIST_SCHEDULED_COMMAND and self.commands.resolve(name) is None:
+                await platform.reply(msg.reply_ctx, self._list_scheduled_tasks_text(msg))
+                return
+            if name == self._UNSCHEDULE_COMMAND and self.commands.resolve(name) is None:
+                if not args:
+                    await platform.reply(
+                        msg.reply_ctx, f"Usage: /{self._UNSCHEDULE_COMMAND} <id> -- see /{self._LIST_SCHEDULED_COMMAND} for ids."
+                    )
+                    return
+                await platform.reply(msg.reply_ctx, self._remove_scheduled_task_text(msg, args[0]))
+                return
+
         expanded = self.commands.expand(msg.content)
         if expanded is not None:
             cmd, expanded_text = expanded
@@ -191,17 +218,32 @@ class Engine:
                     return
 
     def _apply_schedule_requests(self, text: str, msg: Message) -> str:
-        """Strip any ```schedule-task``` blocks out of `text` and act on them.
+        """Strip any schedule-task/list-scheduled-tasks/remove-schedule-task
+        blocks out of `text` and act on them.
 
         platform/channel_id/user_id come from `msg` (the real incoming
-        message), never from the block itself, so the agent can only ever
-        schedule into the channel/user it's actually replying to.
+        message), never from any block itself, so the agent can only ever
+        add/list/remove tasks tied to the channel/user it's actually
+        replying to, never another conversation's.
         """
 
-        cleaned, requests = extract_schedule_requests(text)
-        if not requests:
+        cleaned, add_requests = extract_schedule_requests(text)
+        cleaned, list_count = extract_list_task_requests(cleaned)
+        cleaned, remove_requests = extract_remove_task_requests(cleaned)
+
+        if not add_requests and not list_count and not remove_requests:
             return text
 
+        notes: list[str] = [
+            *self._process_add_requests(add_requests, msg),
+            *self._process_list_requests(list_count, msg),
+            *self._process_remove_requests(remove_requests, msg),
+        ]
+
+        note_text = "\n".join(notes)
+        return f"{cleaned}\n\n{note_text}" if cleaned else note_text
+
+    def _process_add_requests(self, requests: list, msg: Message) -> list[str]:
         notes: list[str] = []
         for request in requests:
             if isinstance(request, ScheduleRequestError):
@@ -228,9 +270,66 @@ class Engine:
             cadence = "" if request.interval_weeks == 1 else f" (every {request.interval_weeks} weeks)"
             when = f"'{request.cron}' {request.timezone}".strip()
             notes.append(f"Scheduled {when}{cadence} (id: {task_id}).")
+        return notes
 
-        note_text = "\n".join(notes)
-        return f"{cleaned}\n\n{note_text}" if cleaned else note_text
+    def _process_list_requests(self, count: int, msg: Message) -> list[str]:
+        if count == 0:
+            return []
+        return [self._list_scheduled_tasks_text(msg)] * count
+
+    def _process_remove_requests(self, requests: list, msg: Message) -> list[str]:
+        notes: list[str] = []
+        for request in requests:
+            if isinstance(request, ScheduleRequestError):
+                notes.append(f"Couldn't remove that: {request.detail}")
+                continue
+            notes.append(self._remove_scheduled_task_text(msg, request.id))
+        return notes
+
+    def _list_scheduled_tasks_text(self, msg: Message) -> str:
+        """Format the scheduled tasks belonging to msg's (platform, channel_id,
+        user_id) -- shared by the ```list-scheduled-tasks``` block and the
+        /scheduled command."""
+
+        if self._scheduled_tasks_dir is None:
+            return "Couldn't list scheduled tasks: scheduled tasks aren't configured on this server."
+        try:
+            tasks = load_scheduled_tasks(self._scheduled_tasks_dir)
+        except Exception:
+            logger.exception("failed to load scheduled tasks for listing")
+            return "Couldn't list scheduled tasks: failed to read them."
+
+        matching = [
+            t
+            for t in tasks
+            if t.platform == msg.platform and t.channel_id == msg.channel_id and t.user_id == msg.user_id
+        ]
+        if not matching:
+            return "No scheduled tasks for this conversation."
+        lines = []
+        for t in matching:
+            when = f"'{t.cron}'{f' {t.timezone}' if t.timezone else ''}"
+            cadence = f" (every {t.interval_weeks} weeks)" if t.interval_weeks != 1 else ""
+            lines.append(f"- id: {t.id} -- {when}{cadence} -- {t.prompt}")
+        return "Scheduled tasks for this conversation:\n" + "\n".join(lines)
+
+    def _remove_scheduled_task_text(self, msg: Message, task_id: str) -> str:
+        """Remove the entry `task_id` scoped to msg's (platform, channel_id,
+        user_id) and report the outcome -- shared by the
+        ```remove-schedule-task``` block and the /unschedule command."""
+
+        if self._scheduled_tasks_dir is None:
+            return "Couldn't remove that: scheduled tasks aren't configured on this server."
+        try:
+            removed = remove_scheduled_task(
+                self._scheduled_tasks_dir, task_id, msg.platform, msg.channel_id, msg.user_id
+            )
+        except OSError:
+            logger.exception("failed to remove scheduled task")
+            return "Couldn't remove that: failed to update the file."
+        if removed:
+            return f"Removed scheduled task (id: {task_id})."
+        return f"Couldn't find a scheduled task with id '{task_id}' in this conversation."
 
     async def _run_exec(self, command: str, work_dir: str) -> str:
         proc = await asyncio.create_subprocess_shell(

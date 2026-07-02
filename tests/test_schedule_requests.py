@@ -1,6 +1,9 @@
 from pocketagent.core.schedule_requests import (
+    RemoveTaskRequest,
     ScheduleRequest,
     ScheduleRequestError,
+    extract_list_task_requests,
+    extract_remove_task_requests,
     extract_schedule_requests,
 )
 
@@ -91,4 +94,62 @@ def test_extract_valid_biweekly_block():
 def test_extract_invalid_interval_weeks_returns_error():
     text = '```schedule-task\ncron = "0 19 * * 4"\ninterval_weeks = 0\nprompt = "hi"\n```'
     cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_list_no_block_returns_text_unchanged():
+    cleaned, count = extract_list_task_requests("just a normal reply")
+    assert cleaned == "just a normal reply"
+    assert count == 0
+
+
+def test_extract_list_block():
+    text = "Sure, let me check.\n\n```list-scheduled-tasks\n```"
+    cleaned, count = extract_list_task_requests(text)
+    assert cleaned == "Sure, let me check."
+    assert count == 1
+
+
+def test_extract_list_block_without_trailing_newline():
+    text = "```list-scheduled-tasks```"
+    cleaned, count = extract_list_task_requests(text)
+    assert cleaned == ""
+    assert count == 1
+
+
+def test_extract_multiple_list_blocks():
+    text = "```list-scheduled-tasks\n```\n```list-scheduled-tasks\n```"
+    cleaned, count = extract_list_task_requests(text)
+    assert cleaned == ""
+    assert count == 2
+
+
+def test_extract_remove_no_block_returns_text_unchanged():
+    cleaned, requests = extract_remove_task_requests("just a normal reply")
+    assert cleaned == "just a normal reply"
+    assert requests == []
+
+
+def test_extract_remove_valid_block():
+    text = 'Sure, cancelling that.\n\n```remove-schedule-task\nid = "abc123"\n```'
+    cleaned, requests = extract_remove_task_requests(text)
+    assert cleaned == "Sure, cancelling that."
+    assert requests == [RemoveTaskRequest(id="abc123")]
+
+
+def test_extract_remove_missing_id_returns_error():
+    text = "```remove-schedule-task\n```"
+    cleaned, requests = extract_remove_task_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_remove_non_string_id_returns_error():
+    text = "```remove-schedule-task\nid = 123\n```"
+    cleaned, requests = extract_remove_task_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_remove_invalid_toml_returns_error():
+    text = "```remove-schedule-task\nthis is not = = valid toml\n```"
+    cleaned, requests = extract_remove_task_requests(text)
     assert isinstance(requests[0], ScheduleRequestError)

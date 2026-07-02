@@ -20,14 +20,14 @@
 #                            sees that day's conversation before it's cleared.
 #
 # Optionally also:
-#   id = "vocab-summary"  -- a short name/id for this entry (any string). If
-#                           omitted, one is auto-generated on each load --
-#                           which then won't be stable across restarts/edits,
-#                           so set your own if you'll want to refer back to
-#                           a specific entry later (e.g. once a remove/list
-#                           feature exists). Entries added by an agent via a
-#                           schedule-task block always get a real one
-#                           persisted at creation time.
+#   id = "vocab-summary"  -- a short name/id for this entry (any string), shown
+#                           in /scheduled's listing and used with /unschedule
+#                           <id> to remove it. If omitted, one is auto-generated
+#                           on each load -- which then won't be stable across
+#                           restarts/edits, so set your own if you'll want to
+#                           refer back to a specific entry later. Entries
+#                           added by an agent via a schedule-task block
+#                           always get a real one persisted at creation time.
 #   interval_weeks = 2   -- fire on only every Nth week the cron expression
 #                           matches (2 = every other week, etc.); defaults
 #                           to 1 (every matching week). Standard cron has no
@@ -64,10 +64,16 @@
 # interval_weeks = 2               # omit for every week; 2 = every other week
 # prompt = "Post the biweekly status update."
 
-# Entries here don't have to be hand-written: an agent can add one itself,
-# mid-conversation, by including a fenced ```schedule-task``` block in its
-# reply (see core/schedule_requests.py). pocketagent tells the agent about
-# this convention automatically, so a user can just say "remind me every day
-# at 9am to check the deploy" and the agent will append the equivalent of
-# the block above on its own -- with platform/channel_id/user_id always
-# taken from that actual conversation, never from anything the agent wrote.
+# Entries here don't have to be hand-written: an agent can add/list/remove
+# them itself, mid-conversation, via schedule-task / list-scheduled-tasks /
+# remove-schedule-task fenced blocks in its reply (see
+# core/schedule_requests.py). pocketagent tells the agent about this
+# convention automatically, so a user can just say "remind me every day at
+# 9am to check the deploy", "what do I have scheduled?", or "cancel that" and
+# the agent handles it -- with platform/channel_id/user_id always taken from
+# that actual conversation, never from anything the agent wrote.
+#
+# Two built-in chat commands work the same way without needing the agent at
+# all -- typed directly by a user, always scoped to that same conversation:
+#   /scheduled           -- list scheduled tasks for this channel/user
+#   /unschedule <id>      -- remove one, by the id shown in the listing

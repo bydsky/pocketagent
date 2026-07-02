@@ -180,6 +180,55 @@ def append_scheduled_task(config_dir: str | Path, task: ScheduledTask) -> str:
     return task.id
 
 
+def _read_preamble(path: Path) -> str:
+    """Whatever precedes the first `[[scheduled_tasks]]` marker (e.g. a file
+    header comment) -- the only part of the original file's formatting
+    remove_scheduled_task preserves; see its docstring."""
+
+    if not path.exists():
+        return ""
+    text = path.read_text()
+    idx = text.find("[[scheduled_tasks]]")
+    return text[:idx] if idx != -1 else ""
+
+
+def remove_scheduled_task(
+    config_dir: str | Path, task_id: str, platform: str, channel_id: str, user_id: str
+) -> bool:
+    """Remove the entry matching `task_id` *and* (platform, channel_id, user_id).
+
+    Returns whether anything was removed. Scoping the match to the caller's
+    own (platform, channel_id, user_id) -- not just `task_id` -- means an
+    agent can only ever remove a task tied to the conversation it's
+    actually replying in, the same restriction append_scheduled_task
+    enforces for adding one.
+
+    Unlike append_scheduled_task, this can't just append raw text -- it has
+    to rewrite the file. Doing so with format_scheduled_task_toml for each
+    remaining entry means any hand-written comments elsewhere in the file
+    (other than a leading file-header comment, which is preserved) are
+    lost; this is an accepted tradeoff for keeping the removal logic simple
+    and correct rather than surgically diffing the original text.
+    """
+
+    path = Path(config_dir) / SCHEDULED_TASKS_FILENAME
+    tasks = load_scheduled_tasks(config_dir)
+    remaining = [
+        t
+        for t in tasks
+        if not (t.id == task_id and t.platform == platform and t.channel_id == channel_id and t.user_id == user_id)
+    ]
+    if len(remaining) == len(tasks):
+        return False
+
+    preamble = _read_preamble(path).rstrip()
+    parts = ([preamble] if preamble else []) + [
+        format_scheduled_task_toml(t).rstrip("\n") for t in remaining
+    ]
+    path.write_text(("\n\n".join(parts) + "\n") if parts else "")
+    return True
+
+
 async def run_scheduled_task(
     engine: "Engine", platform: "Platform", channel_id: str, user_id: str, prompt: str
 ) -> None:

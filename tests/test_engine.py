@@ -5,7 +5,7 @@ from typing import AsyncIterator
 import pytest
 
 from pocketagent.core.agent import Agent, AgentSession
-from pocketagent.core.commands import CommandRegistry
+from pocketagent.core.commands import CommandRegistry, CustomCommand
 from pocketagent.core.engine import Engine
 from pocketagent.core.platform import Platform
 from pocketagent.core.router import Router
@@ -34,9 +34,13 @@ class _FakeAgentSession(AgentSession):
 class _FakeAgent(Agent):
     name = "fake"
 
+    def __init__(self):
+        self.start_session_calls = 0
+
     async def start_session(
         self, session_id, work_dir, platform_system_prompt="", show_footer=False
     ) -> AgentSession:
+        self.start_session_calls += 1
         self.last_platform_system_prompt = platform_system_prompt
         self.last_show_footer = show_footer
         return _FakeAgentSession()
@@ -306,6 +310,344 @@ async def test_on_message_writes_biweekly_scheduled_task_and_shows_confirmation(
     assert len(tasks) == 1
     assert tasks[0].cron == "0 19 * * 4"
     assert tasks[0].interval_weeks == 2
+
+
+@pytest.mark.asyncio
+async def test_on_message_lists_scheduled_tasks_for_this_conversation(tmp_path):
+    from pocketagent.core.scheduled_tasks import ScheduledTask, append_scheduled_task
+
+    task = ScheduledTask(platform="fake", channel_id="1", user_id="1", cron="0 9 * * *", prompt="Morning check-in.")
+    task_id = append_scheduled_task(tmp_path, task)
+
+    class _ListingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content="Sure, let me check.\n\n```list-scheduled-tasks\n```",
+                done=True,
+            )
+
+    class _ListingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _ListingAgentSession()
+
+    agent = _ListingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert "list-scheduled-tasks" not in platform.replies[0]
+    assert f"id: {task_id}" in platform.replies[0]
+    assert "Morning check-in." in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_on_message_lists_no_scheduled_tasks_message_when_empty(tmp_path):
+    class _ListingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(type=EventType.RESULT, content="```list-scheduled-tasks\n```", done=True)
+
+    class _ListingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _ListingAgentSession()
+
+    agent = _ListingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert platform.replies == ["No scheduled tasks for this conversation."]
+
+
+@pytest.mark.asyncio
+async def test_on_message_list_only_shows_this_channel_and_users_tasks(tmp_path):
+    from pocketagent.core.scheduled_tasks import ScheduledTask, append_scheduled_task
+
+    mine = ScheduledTask(platform="fake", channel_id="1", user_id="1", cron="0 9 * * *", prompt="mine")
+    other = ScheduledTask(platform="fake", channel_id="999", user_id="999", cron="0 10 * * *", prompt="not mine")
+    append_scheduled_task(tmp_path, mine)
+    append_scheduled_task(tmp_path, other)
+
+    class _ListingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(type=EventType.RESULT, content="```list-scheduled-tasks\n```", done=True)
+
+    class _ListingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _ListingAgentSession()
+
+    agent = _ListingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert "mine" in platform.replies[0]
+    assert "not mine" not in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_on_message_removes_scheduled_task_by_id(tmp_path):
+    from pocketagent.core.scheduled_tasks import ScheduledTask, append_scheduled_task, load_scheduled_tasks
+
+    task = ScheduledTask(platform="fake", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
+    task_id = append_scheduled_task(tmp_path, task)
+
+    class _RemovingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content=f'Cancelling that.\n\n```remove-schedule-task\nid = "{task_id}"\n```',
+                done=True,
+            )
+
+    class _RemovingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _RemovingAgentSession()
+
+    agent = _RemovingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert "remove-schedule-task" not in platform.replies[0]
+    assert f"Removed scheduled task (id: {task_id})." in platform.replies[0]
+    assert load_scheduled_tasks(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_on_message_remove_reports_not_found(tmp_path):
+    class _RemovingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content='```remove-schedule-task\nid = "no-such-id"\n```',
+                done=True,
+            )
+
+    class _RemovingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _RemovingAgentSession()
+
+    agent = _RemovingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert "Couldn't find a scheduled task with id 'no-such-id'" in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_on_message_remove_cannot_remove_another_channels_task(tmp_path):
+    from pocketagent.core.scheduled_tasks import ScheduledTask, append_scheduled_task, load_scheduled_tasks
+
+    other = ScheduledTask(platform="fake", channel_id="999", user_id="999", cron="0 9 * * *", prompt="not mine")
+    other_id = append_scheduled_task(tmp_path, other)
+
+    class _RemovingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content=f'```remove-schedule-task\nid = "{other_id}"\n```',
+                done=True,
+            )
+
+    class _RemovingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _RemovingAgentSession()
+
+    agent = _RemovingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    from dataclasses import replace
+
+    assert f"Couldn't find a scheduled task with id '{other_id}'" in platform.replies[0]
+    assert load_scheduled_tasks(tmp_path) == [replace(other, id=other_id)]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_command_lists_tasks_without_calling_agent(tmp_path):
+    from pocketagent.core.scheduled_tasks import ScheduledTask, append_scheduled_task
+
+    task = ScheduledTask(platform="fake", channel_id="1", user_id="1", cron="0 9 * * *", prompt="Morning check-in.")
+    task_id = append_scheduled_task(tmp_path, task)
+
+    engine, agent = _make_engine(tmp_path, scheduled_tasks_dir=tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = "/scheduled"
+
+    await engine.on_message(platform, msg)
+
+    assert agent.start_session_calls == 0
+    assert f"id: {task_id}" in platform.replies[0]
+    assert "Morning check-in." in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_command_reports_none_when_empty(tmp_path):
+    engine, agent = _make_engine(tmp_path, scheduled_tasks_dir=tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = "/scheduled"
+
+    await engine.on_message(platform, msg)
+
+    assert agent.start_session_calls == 0
+    assert platform.replies == ["No scheduled tasks for this conversation."]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_command_reports_not_configured(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = "/scheduled"
+
+    await engine.on_message(platform, msg)
+
+    assert agent.start_session_calls == 0
+    assert "aren't configured" in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_unschedule_command_removes_task_without_calling_agent(tmp_path):
+    from pocketagent.core.scheduled_tasks import ScheduledTask, append_scheduled_task, load_scheduled_tasks
+
+    task = ScheduledTask(platform="fake", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
+    task_id = append_scheduled_task(tmp_path, task)
+
+    engine, agent = _make_engine(tmp_path, scheduled_tasks_dir=tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = f"/unschedule {task_id}"
+
+    await engine.on_message(platform, msg)
+
+    assert agent.start_session_calls == 0
+    assert platform.replies == [f"Removed scheduled task (id: {task_id})."]
+    assert load_scheduled_tasks(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_unschedule_command_reports_not_found(tmp_path):
+    engine, agent = _make_engine(tmp_path, scheduled_tasks_dir=tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = "/unschedule no-such-id"
+
+    await engine.on_message(platform, msg)
+
+    assert agent.start_session_calls == 0
+    assert "Couldn't find a scheduled task with id 'no-such-id'" in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_unschedule_command_cannot_remove_another_channels_task(tmp_path):
+    from pocketagent.core.scheduled_tasks import ScheduledTask, append_scheduled_task, load_scheduled_tasks
+    from dataclasses import replace
+
+    other = ScheduledTask(platform="fake", channel_id="999", user_id="999", cron="0 9 * * *", prompt="not mine")
+    other_id = append_scheduled_task(tmp_path, other)
+
+    engine, agent = _make_engine(tmp_path, scheduled_tasks_dir=tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = f"/unschedule {other_id}"
+
+    await engine.on_message(platform, msg)
+
+    assert f"Couldn't find a scheduled task with id '{other_id}'" in platform.replies[0]
+    assert load_scheduled_tasks(tmp_path) == [replace(other, id=other_id)]
+
+
+@pytest.mark.asyncio
+async def test_unschedule_command_without_id_shows_usage(tmp_path):
+    engine, agent = _make_engine(tmp_path, scheduled_tasks_dir=tmp_path)
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = "/unschedule"
+
+    await engine.on_message(platform, msg)
+
+    assert agent.start_session_calls == 0
+    assert "Usage: /unschedule" in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_user_configured_command_takes_precedence_over_builtin_scheduled(tmp_path):
+    engine, agent = _make_engine(tmp_path, scheduled_tasks_dir=tmp_path)
+    engine.commands.add(CustomCommand(name="scheduled", prompt="Tell me a joke about {{args}}"))
+    platform = _FakePlatform()
+    msg = _make_message()
+    msg.content = "/scheduled cats"
+
+    await engine.on_message(platform, msg)
+
+    # Falls through to the normal agent path instead of the built-in listing.
+    assert agent.start_session_calls == 1
+    assert platform.replies == ["ok"]
 
 
 @pytest.mark.asyncio

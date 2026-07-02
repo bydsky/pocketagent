@@ -12,6 +12,7 @@ from pocketagent.core.scheduled_tasks import (
     ScheduledTask,
     append_scheduled_task,
     load_scheduled_tasks,
+    remove_scheduled_task,
     run_scheduled_task,
 )
 from pocketagent.core.session_store import SessionStore
@@ -287,3 +288,64 @@ def test_load_scheduled_tasks_rejects_invalid_interval_weeks(tmp_path):
     )
     with pytest.raises(ValueError):
         load_scheduled_tasks(tmp_path)
+
+
+def test_remove_scheduled_task_removes_matching_entry(tmp_path):
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
+    task_id = append_scheduled_task(tmp_path, task)
+
+    removed = remove_scheduled_task(tmp_path, task_id, "discord", "1", "1")
+
+    assert removed is True
+    assert load_scheduled_tasks(tmp_path) == []
+
+
+def test_remove_scheduled_task_keeps_other_entries(tmp_path):
+    first = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="one")
+    second = ScheduledTask(platform="discord", channel_id="2", user_id="2", cron="0 10 * * *", prompt="two")
+    first_id = append_scheduled_task(tmp_path, first)
+    second_id = append_scheduled_task(tmp_path, second)
+
+    removed = remove_scheduled_task(tmp_path, first_id, "discord", "1", "1")
+
+    assert removed is True
+    remaining = load_scheduled_tasks(tmp_path)
+    assert len(remaining) == 1
+    assert remaining[0].id == second_id
+
+
+def test_remove_scheduled_task_returns_false_when_id_not_found(tmp_path):
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
+    append_scheduled_task(tmp_path, task)
+
+    removed = remove_scheduled_task(tmp_path, "no-such-id", "discord", "1", "1")
+
+    assert removed is False
+    assert len(load_scheduled_tasks(tmp_path)) == 1
+
+
+def test_remove_scheduled_task_scoped_to_matching_channel_and_user(tmp_path):
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
+    task_id = append_scheduled_task(tmp_path, task)
+
+    # Same id, but a different channel/user -- must not remove someone else's task.
+    removed = remove_scheduled_task(tmp_path, task_id, "discord", "999", "999")
+
+    assert removed is False
+    assert len(load_scheduled_tasks(tmp_path)) == 1
+
+
+def test_remove_scheduled_task_on_missing_file_returns_false(tmp_path):
+    removed = remove_scheduled_task(tmp_path, "whatever", "discord", "1", "1")
+    assert removed is False
+
+
+def test_remove_scheduled_task_preserves_file_header_preamble(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text("# a file header comment\n\n")
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
+    task_id = append_scheduled_task(tmp_path, task)
+
+    remove_scheduled_task(tmp_path, task_id, "discord", "1", "1")
+
+    assert path.read_text().strip() == "# a file header comment"
