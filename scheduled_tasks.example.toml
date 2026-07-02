@@ -20,6 +20,14 @@
 #                            sees that day's conversation before it's cleared.
 #
 # Optionally also:
+#   id = "vocab-summary"  -- a short name/id for this entry (any string). If
+#                           omitted, one is auto-generated on each load --
+#                           which then won't be stable across restarts/edits,
+#                           so set your own if you'll want to refer back to
+#                           a specific entry later (e.g. once a remove/list
+#                           feature exists). Entries added by an agent via a
+#                           schedule-task block always get a real one
+#                           persisted at creation time.
 #   interval_weeks = 2   -- fire on only every Nth week the cron expression
 #                           matches (2 = every other week, etc.); defaults
 #                           to 1 (every matching week). Standard cron has no
@@ -38,6 +46,7 @@
 # secrets too.)
 
 # [[scheduled_tasks]]
+# id = "vocab-summary"
 # platform = "discord"
 # channel_id = "123456789012345678"
 # user_id = "234567890123456789"   # whose session to use (sessions are per
@@ -47,6 +56,7 @@
 # prompt = "Summarize all new vocabulary words discussed in this channel today."
 
 # [[scheduled_tasks]]
+# id = "biweekly-status"
 # platform = "discord"
 # channel_id = "123456789012345678"
 # user_id = "234567890123456789"

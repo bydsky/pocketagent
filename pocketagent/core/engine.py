@@ -220,14 +220,14 @@ class Engine:
                 interval_weeks=request.interval_weeks,
             )
             try:
-                append_scheduled_task(self._scheduled_tasks_dir, task)
+                task_id = append_scheduled_task(self._scheduled_tasks_dir, task)
             except OSError:
                 logger.exception("failed to append scheduled task")
                 notes.append("Couldn't schedule that: failed to save it.")
                 continue
             cadence = "" if request.interval_weeks == 1 else f" (every {request.interval_weeks} weeks)"
             when = f"'{request.cron}' {request.timezone}".strip()
-            notes.append(f"Scheduled {when}{cadence}.")
+            notes.append(f"Scheduled {when}{cadence} (id: {task_id}).")
 
         note_text = "\n".join(notes)
         return f"{cleaned}\n\n{note_text}" if cleaned else note_text

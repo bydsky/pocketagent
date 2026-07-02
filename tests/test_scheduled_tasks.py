@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import AsyncIterator
 
 import pytest
@@ -126,20 +127,43 @@ def test_append_scheduled_task_creates_file_and_is_readable_back(tmp_path):
         platform="discord", channel_id="111", user_id="222", cron="0 9 * * *", prompt="hi", timezone="UTC"
     )
 
-    append_scheduled_task(tmp_path, task)
+    task_id = append_scheduled_task(tmp_path, task)
 
     loaded = load_scheduled_tasks(tmp_path)
-    assert loaded == [task]
+    assert loaded == [replace(task, id=task_id)]
+
+
+def test_append_scheduled_task_assigns_and_persists_an_id_when_missing(tmp_path):
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
+    assert task.id == ""
+
+    task_id = append_scheduled_task(tmp_path, task)
+
+    assert task_id
+    assert load_scheduled_tasks(tmp_path)[0].id == task_id
+    # A second load reuses the persisted id rather than generating a new one.
+    assert load_scheduled_tasks(tmp_path)[0].id == task_id
+
+
+def test_append_scheduled_task_keeps_explicit_id(tmp_path):
+    task = ScheduledTask(
+        platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi", id="my-custom-id"
+    )
+
+    task_id = append_scheduled_task(tmp_path, task)
+
+    assert task_id == "my-custom-id"
+    assert load_scheduled_tasks(tmp_path)[0].id == "my-custom-id"
 
 
 def test_append_scheduled_task_twice_keeps_both_entries(tmp_path):
     first = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="one")
     second = ScheduledTask(platform="discord", channel_id="2", user_id="2", cron="0 10 * * *", prompt="two")
 
-    append_scheduled_task(tmp_path, first)
-    append_scheduled_task(tmp_path, second)
+    first_id = append_scheduled_task(tmp_path, first)
+    second_id = append_scheduled_task(tmp_path, second)
 
-    assert load_scheduled_tasks(tmp_path) == [first, second]
+    assert load_scheduled_tasks(tmp_path) == [replace(first, id=first_id), replace(second, id=second_id)]
 
 
 def test_append_scheduled_task_escapes_special_characters_in_prompt(tmp_path):
@@ -151,9 +175,9 @@ def test_append_scheduled_task_escapes_special_characters_in_prompt(tmp_path):
         prompt='has "quotes", a\nnewline, and a \\backslash',
     )
 
-    append_scheduled_task(tmp_path, task)
+    task_id = append_scheduled_task(tmp_path, task)
 
-    assert load_scheduled_tasks(tmp_path) == [task]
+    assert load_scheduled_tasks(tmp_path) == [replace(task, id=task_id)]
 
 
 def test_append_scheduled_task_preserves_existing_file_content(tmp_path):
@@ -161,10 +185,10 @@ def test_append_scheduled_task_preserves_existing_file_content(tmp_path):
     path.write_text("# a hand-written comment\n")
     task = ScheduledTask(platform="discord", channel_id="1", user_id="1", cron="0 9 * * *", prompt="hi")
 
-    append_scheduled_task(tmp_path, task)
+    task_id = append_scheduled_task(tmp_path, task)
 
     assert path.read_text().startswith("# a hand-written comment\n")
-    assert load_scheduled_tasks(tmp_path) == [task]
+    assert load_scheduled_tasks(tmp_path) == [replace(task, id=task_id)]
 
 
 def test_append_and_load_biweekly_task(tmp_path):
@@ -177,11 +201,44 @@ def test_append_and_load_biweekly_task(tmp_path):
         interval_weeks=2,
     )
 
-    append_scheduled_task(tmp_path, task)
+    task_id = append_scheduled_task(tmp_path, task)
 
     contents = (tmp_path / "scheduled_tasks.toml").read_text()
     assert "interval_weeks = 2" in contents
-    assert load_scheduled_tasks(tmp_path) == [task]
+    assert load_scheduled_tasks(tmp_path) == [replace(task, id=task_id)]
+
+
+def test_load_scheduled_tasks_generates_id_when_missing(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        cron = "0 9 * * *"
+        """
+    )
+    tasks = load_scheduled_tasks(tmp_path)
+    assert tasks[0].id != ""
+
+
+def test_load_scheduled_tasks_keeps_explicit_id(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        id = "my-task"
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        cron = "0 9 * * *"
+        """
+    )
+    tasks = load_scheduled_tasks(tmp_path)
+    assert tasks[0].id == "my-task"
 
 
 def test_load_scheduled_tasks_requires_cron(tmp_path):

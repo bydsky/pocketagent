@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import logging
 import tomllib
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,10 +30,24 @@ logger = logging.getLogger(__name__)
 SCHEDULED_TASKS_FILENAME = "scheduled_tasks.toml"
 
 
+def generate_task_id() -> str:
+    """A short opaque id for a ScheduledTask, unique enough for this use case."""
+
+    return uuid.uuid4().hex[:8]
+
+
 @dataclass
 class ScheduledTask:
     """A prompt fired into one (platform, channel_id, user_id) session on a
     schedule, with the reply posted proactively to that channel.
+
+    `id` identifies this entry (e.g. for a future list/remove feature).
+    Entries written by `append_scheduled_task` always get a persisted,
+    stable one; entries loaded from a hand-edited scheduled_tasks.toml that
+    doesn't set `id` get one generated fresh on each load instead (not
+    written back, to avoid rewriting -- and losing comments/formatting in --
+    the rest of the file) so it isn't guaranteed stable across reloads
+    unless you set `id` explicitly.
 
     `cron` is a standard 5-field cron expression (minute hour day month
     weekday, e.g. "0 19 * * 4" for Thursdays at 19:00), evaluated in
@@ -52,6 +67,7 @@ class ScheduledTask:
     user_id: str
     prompt: str
     cron: str
+    id: str = ""
     timezone: str = ""
     interval_weeks: int = 1
 
@@ -86,6 +102,10 @@ def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
                 f"'interval_weeks' {interval_weeks!r} (expected a positive integer)"
             )
 
+        task_id = raw.get("id", "")
+        if not isinstance(task_id, str):
+            raise ValueError(f"scheduled_tasks: entry for channel_id={channel_id!r} has a non-string 'id'")
+
         tasks.append(
             ScheduledTask(
                 platform=raw["platform"],
@@ -93,6 +113,7 @@ def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
                 user_id=str(raw["user_id"]),
                 prompt=raw["prompt"],
                 cron=cron_expr,
+                id=task_id or generate_task_id(),
                 timezone=raw.get("timezone", ""),
                 interval_weeks=interval_weeks,
             )
@@ -112,8 +133,10 @@ def _toml_string(value: str) -> str:
 
 
 def format_scheduled_task_toml(task: ScheduledTask) -> str:
-    lines = [
-        "[[scheduled_tasks]]",
+    lines = ["[[scheduled_tasks]]"]
+    if task.id:
+        lines.append(f"id = {_toml_string(task.id)}")
+    lines += [
         f"platform = {_toml_string(task.platform)}",
         f"channel_id = {_toml_string(task.channel_id)}",
         f"user_id = {_toml_string(task.user_id)}",
@@ -127,8 +150,14 @@ def format_scheduled_task_toml(task: ScheduledTask) -> str:
     return "\n".join(lines) + "\n"
 
 
-def append_scheduled_task(config_dir: str | Path, task: ScheduledTask) -> None:
+def append_scheduled_task(config_dir: str | Path, task: ScheduledTask) -> str:
     """Append `task` to scheduled_tasks.toml as a new `[[scheduled_tasks]]` block.
+
+    Assigns `task.id` a fresh generate_task_id() if it doesn't already have
+    one, so every appended entry gets a real, persisted id -- unlike
+    entries loaded straight from a hand-edited file that skip `id`, which
+    only get one generated fresh in memory on each load (see
+    load_scheduled_tasks). Returns the id that was written.
 
     Appends raw text instead of rewriting the whole file so any existing
     entries/comments/formatting are left untouched -- lets Engine (see
@@ -139,12 +168,16 @@ def append_scheduled_task(config_dir: str | Path, task: ScheduledTask) -> None:
     concurrent write mid-call.
     """
 
+    if not task.id:
+        task = replace(task, id=generate_task_id())
+
     path = Path(config_dir) / SCHEDULED_TASKS_FILENAME
     needs_separator = path.exists() and path.stat().st_size > 0
     with path.open("a", encoding="utf-8") as f:
         if needs_separator:
             f.write("\n")
         f.write(format_scheduled_task_toml(task))
+    return task.id
 
 
 async def run_scheduled_task(

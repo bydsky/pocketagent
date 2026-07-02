@@ -214,12 +214,14 @@ async def test_on_message_writes_scheduled_task_and_shows_confirmation(tmp_path)
     assert len(platform.replies) == 1
     assert "Sure, I'll check in daily." in platform.replies[0]
     assert "schedule-task" not in platform.replies[0]
-    assert "Scheduled '0 9 * * *' UTC." in platform.replies[0]
+    assert "Scheduled '0 9 * * *' UTC" in platform.replies[0]
+    assert "(id:" in platform.replies[0]
 
     from pocketagent.core.scheduled_tasks import load_scheduled_tasks
 
     tasks = load_scheduled_tasks(tmp_path)
     assert len(tasks) == 1
+    assert tasks[0].id != ""
     assert tasks[0].platform == "fake"
     assert tasks[0].channel_id == "1"
     assert tasks[0].user_id == "1"
