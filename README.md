@@ -18,10 +18,11 @@ coding agent from a chat app.
   sent to the agent. See `config.example.toml`.
 - Conversation continuity survives restarts: the agent's own session id is
   persisted per channel/user and passed back via `--resume`.
-- **Daily reset**: an optional `[daily_reset]` time-of-day in config clears
-  every channel's conversation once a day, so the next message starts a
-  fresh session instead of resuming; any channel can override the time (or
-  disable it) via `daily_reset_time` in its per-channel override. See
+- **Daily reset**: an optional `[daily_reset]` cron schedule in config clears
+  every channel's conversation, so the next message starts a fresh session
+  instead of resuming; any channel can override the schedule (or disable it)
+  via `daily_reset_cron` in its per-channel override. Editing `[daily_reset]`
+  takes effect without a restart — send the process `SIGHUP`. See
   `config.example.toml`.
 - **Usage-limit backlog**: when an agent backend reports its usage limit is
   exhausted (claude_code's 5h/7d limits), pocketagent stops sending to it,
@@ -29,11 +30,24 @@ coding agent from a chat app.
   instead of erroring, and automatically replays them in order once the
   limit resets — no config needed. Held in memory only, so a restart during
   the limit window drops anything still queued.
-- **Scheduled tasks**: optional `[[scheduled_tasks]]` entries fire a prompt
-  into a specific channel's existing session once a day and post the reply
-  proactively — e.g. a nightly "summarize today's new vocabulary" digest.
-  Reuses that channel's conversation history, and is skipped if the channel
-  has no session yet. See `config.example.toml`.
+- **Scheduled tasks**: entries in a separate `scheduled_tasks.toml` (kept
+  apart from `pocketagent.toml`'s platform tokens) fire a prompt into a
+  specific channel's existing session on a schedule and post the reply
+  proactively — e.g. a nightly "summarize today's new vocabulary" digest or
+  a biweekly status check. Each entry is a standard 5-field cron expression
+  plus an optional `interval_weeks` for "every Nth week"; reuses that
+  channel's conversation history, and is skipped if the channel has no
+  session yet. The file is auto-reloaded (polled every 30s), so edits take
+  effect without a restart or signal. See `scheduled_tasks.example.toml`.
+  - An agent can manage its own schedule mid-conversation — add, list, or
+    cancel — just by including a `schedule-task` / `list-scheduled-tasks` /
+    `remove-schedule-task` fenced block in a reply; pocketagent teaches it
+    this convention automatically, scoped so it can only ever touch tasks
+    tied to the channel/user it's actually replying to.
+  - `/scheduled` and `/unschedule <id>` work the same way without needing
+    the agent at all, and (unless you've defined your own commands of the
+    same name) show up as real Discord slash commands / Telegram
+    autocomplete alongside your configured `[commands.*]`.
 
 ## Setup
 
@@ -41,6 +55,7 @@ coding agent from a chat app.
 pip install -e .
 cp config.example.toml pocketagent.toml
 # edit pocketagent.toml: Discord bot token, base_dir, etc.
+cp scheduled_tasks.example.toml scheduled_tasks.toml   # optional; must live next to pocketagent.toml
 pocketagent run -c pocketagent.toml
 ```
 
@@ -99,7 +114,8 @@ running pocketagent.
 ```
 pocketagent/
   core/            platform-agnostic abstractions: Platform, Agent, Engine,
-                   routing, workspaces, commands, session persistence
+                   routing, workspaces, commands, session persistence,
+                   scheduling (daily_reset, scheduled_tasks.toml)
   platforms/       one module per chat platform (discord_platform.py,
                    telegram_platform.py, slack_platform.py)
   agents/          one module per agent backend (claude_code.py, codex.py,

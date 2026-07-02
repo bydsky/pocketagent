@@ -15,7 +15,9 @@ session id is persisted per channel/user and passed back via `--resume`.
 Custom commands (config-defined prompt templates or shell commands) let `/deploy api prod`
 expand a template like `"Deploy {{1}} to the {{2:staging}} environment..."` into a normal
 prompt, or run a literal shell command in the channel's workspace dir. See
-`config.example.toml` for the full config shape.
+`config.example.toml` for the full config shape. Engine also registers a couple of its own
+built-in commands (`/scheduled`, `/unschedule`) into the same registry -- see Scheduling
+below.
 
 ## Commands
 
@@ -26,6 +28,7 @@ pytest tests/test_router.py       # run one test file
 pytest tests/test_router.py::test_name -v   # run a single test
 
 cp config.example.toml pocketagent.toml   # then edit: Discord token, base_dir, etc.
+cp scheduled_tasks.example.toml scheduled_tasks.toml   # optional; must sit next to pocketagent.toml
 pocketagent run -c pocketagent.toml       # run the bridge (requires `claude` CLI on PATH)
 pocketagent run -c pocketagent.toml -v    # with debug logging
 ```
@@ -78,7 +81,9 @@ Supporting pieces in `core/`:
   can `--resume` instead of starting fresh.
 - **`commands.py`**: parses `/name arg1 arg2`, expands `{{1}}`, `{{N:default}}`, `{{N*}}`,
   `{{args}}` placeholders against a configured prompt template (or appends args to an
-  `exec` shell command — exec args are not template-expanded, just appended).
+  `exec` shell command — exec args are not template-expanded, just appended). A third kind,
+  `builtin` (an opaque tag Engine switches on instead of a user-defined prompt/exec), is how
+  Engine registers `/scheduled`/`/unschedule` into the same registry — see Scheduling below.
 - **`textsplit.py`**: splits long agent replies into platform-size chunks without breaking
   a message across an open fenced code block.
 - **`types.py`**: the shared `Message`, `Event`/`EventType`, `ImageAttachment`,
@@ -89,6 +94,51 @@ Supporting pieces in `core/`:
 `config.py` loads `pocketagent.toml` (via `tomllib`) into `AppConfig`/`PlatformConfig` and
 wires up the concrete `Agent`/`Platform` instances and `Engine` (`build_app`). New agent or
 platform types register themselves in `AGENT_FACTORIES` / `PLATFORM_FACTORIES` there.
+
+### Scheduling (`core/scheduler.py`, `core/scheduled_tasks.py`, `core/schedule_requests.py`)
+
+Two independent recurring schedules, both driven by `CronScheduler` (a standard 5-field
+cron expression via the `croniter` dependency, plus `interval_weeks` as a bolt-on filter for
+"every Nth week" since cron itself has no such concept — anchored to a fixed reference date
+so which weeks are "on" doesn't drift across restarts):
+
+- **`[daily_reset]`** in `pocketagent.toml` (+ per-channel `daily_reset_cron` /
+  `daily_reset_timezone` overrides in `ChannelOverride`, `core/router.py`) clears matching
+  sessions (`Engine.clear_sessions`). Built by `config.build_reset_groups` /
+  `__main__._build_reset_schedulers`. Reloadable without a restart via `SIGHUP`
+  (`__main__._reload_reset_schedulers`) — re-reading `pocketagent.toml` means re-reading
+  platform tokens too, so this can't be fully automatic.
+- **`scheduled_tasks.toml`** (`core/scheduled_tasks.py`) is a sibling file to
+  `pocketagent.toml`, kept separate specifically so it holds no secrets and can be
+  auto-reloaded by polling its mtime every 30s (`__main__._watch_scheduled_tasks_file`) with
+  no signal needed. Each `ScheduledTask` has a `platform`/`channel_id`/`user_id`,
+  `cron`/`timezone`/`interval_weeks`, `prompt`, and an `id` (persisted for entries added via
+  `append_scheduled_task`; generated fresh in-memory on load for hand-written entries that
+  omit it). `run_scheduled_task` fires the prompt into that session (skipped if no session
+  yet) and posts the reply proactively via `Platform.make_channel_ctx`.
+
+An agent can manage `scheduled_tasks.toml` itself, mid-conversation, by including one of
+three fenced blocks in its reply — `schedule-task` (add), `list-scheduled-tasks` (bare
+marker), or `remove-schedule-task` (`id = "..."`) — parsed by
+`core/schedule_requests.py` and actioned by `Engine._apply_schedule_requests`, which always
+takes `platform`/`channel_id`/`user_id` from the real inbound `Message`, never from the
+block, so an agent can only ever touch tasks tied to the conversation it's actually in.
+`Engine` appends `SCHEDULE_TASK_INSTRUCTIONS` to the combined system prompt to teach this
+convention (only when `scheduled_tasks_dir` is configured — the normal `build_app` path
+always sets it to the config file's directory).
+
+The same add/list/remove operations are also reachable without the agent via built-in
+`/scheduled` and `/unschedule <id>` commands, which `Engine._register_builtin_commands`
+adds directly to the shared `CommandRegistry` (again gated on `scheduled_tasks_dir` being
+set, and skipped per-name if the user already defined their own `[commands.scheduled]` /
+`[commands.unschedule]`) — since Discord/Telegram already iterate `commands.all()` to
+register real slash commands/autocomplete, these show up there automatically too.
+
+`core/scheduler.py` also has `OneShotScheduler` (a single absolute instant, with
+`reschedule()` to push it later without losing what's queued) used by `Engine`'s
+usage-limit retry backlog — unrelated to the above, and `next_occurrence`/`resolve_timezone`
+reused standalone by `claude_code.py` to parse a usage-limit denial's own "resets HH:MM"
+wording.
 
 ### Claude Code agent backend (`agents/claude_code.py`)
 
