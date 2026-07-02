@@ -79,7 +79,10 @@ def test_load_config_parses_scheduled_tasks(tmp_path):
         token = "x"
         default_agent = "claude_code"
         base_dir = "/tmp/ws"
-
+        """
+    )
+    (tmp_path / "scheduled_tasks.toml").write_text(
+        """
         [[scheduled_tasks]]
         platform = "discord"
         channel_id = "111"

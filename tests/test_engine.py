@@ -79,7 +79,10 @@ class _FakePlatform(Platform):
 
 
 def _make_engine(
-    tmp_path, platform_system_prompt: str = "", show_footer: bool = True
+    tmp_path,
+    platform_system_prompt: str = "",
+    show_footer: bool = True,
+    scheduled_tasks_dir=None,
 ) -> tuple[Engine, _FakeAgent]:
     agent = _FakeAgent()
     workspace = WorkspaceManager(tmp_path / "workspace")
@@ -95,6 +98,7 @@ def _make_engine(
         routers={"fake": router},
         session_store=session_store,
         commands=CommandRegistry(),
+        scheduled_tasks_dir=scheduled_tasks_dir,
     )
     return engine, agent
 
@@ -149,6 +153,112 @@ async def test_on_message_passes_platform_system_prompt_to_agent(tmp_path):
     await engine.on_message(platform, _make_message())
 
     assert agent.last_platform_system_prompt == "You are operating via chat."
+
+
+@pytest.mark.asyncio
+async def test_on_message_appends_schedule_instructions_when_configured(tmp_path):
+    engine, agent = _make_engine(
+        tmp_path, platform_system_prompt="You are operating via chat.", scheduled_tasks_dir=tmp_path
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert agent.last_platform_system_prompt.startswith("You are operating via chat.\n\n")
+    assert "schedule-task" in agent.last_platform_system_prompt
+
+
+@pytest.mark.asyncio
+async def test_on_message_no_schedule_instructions_when_not_configured(tmp_path):
+    engine, agent = _make_engine(tmp_path, platform_system_prompt="You are operating via chat.")
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert agent.last_platform_system_prompt == "You are operating via chat."
+
+
+@pytest.mark.asyncio
+async def test_on_message_writes_scheduled_task_and_shows_confirmation(tmp_path):
+    class _SchedulingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content=(
+                    "Sure, I'll check in daily.\n\n"
+                    '```schedule-task\ntime = "09:00"\ntimezone = "UTC"\n'
+                    'prompt = "Check on the build."\n```'
+                ),
+                done=True,
+            )
+
+    class _SchedulingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _SchedulingAgentSession()
+
+    agent = _SchedulingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert len(platform.replies) == 1
+    assert "Sure, I'll check in daily." in platform.replies[0]
+    assert "schedule-task" not in platform.replies[0]
+    assert "Scheduled daily at 09:00 UTC." in platform.replies[0]
+
+    from pocketagent.core.scheduled_tasks import load_scheduled_tasks
+
+    tasks = load_scheduled_tasks(tmp_path)
+    assert len(tasks) == 1
+    assert tasks[0].platform == "fake"
+    assert tasks[0].channel_id == "1"
+    assert tasks[0].user_id == "1"
+    assert tasks[0].time == "09:00"
+    assert tasks[0].timezone == "UTC"
+    assert tasks[0].prompt == "Check on the build."
+
+
+@pytest.mark.asyncio
+async def test_on_message_schedule_task_error_shown_and_nothing_written(tmp_path):
+    class _BadSchedulingAgentSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            yield Event(
+                type=EventType.RESULT,
+                content='```schedule-task\ntime = "99:99"\nprompt = "hi"\n```',
+                done=True,
+            )
+
+    class _BadSchedulingAgent(_FakeAgent):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+            return _BadSchedulingAgentSession()
+
+    agent = _BadSchedulingAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    router = Router(default_agent="fake", workspace=workspace)
+    session_store = SessionStore(tmp_path / "sessions.json")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": router},
+        session_store=session_store,
+        commands=CommandRegistry(),
+        scheduled_tasks_dir=tmp_path,
+    )
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert "Couldn't schedule that" in platform.replies[0]
+    assert not (tmp_path / "scheduled_tasks.toml").exists()
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,12 @@ from pocketagent.core.commands import CommandRegistry
 from pocketagent.core.engine import Engine
 from pocketagent.core.platform import Platform
 from pocketagent.core.router import Router
-from pocketagent.core.scheduled_tasks import run_scheduled_task
+from pocketagent.core.scheduled_tasks import (
+    ScheduledTask,
+    append_scheduled_task,
+    load_scheduled_tasks,
+    run_scheduled_task,
+)
 from pocketagent.core.session_store import SessionStore
 from pocketagent.core.types import Event, EventType
 from pocketagent.core.workspace import WorkspaceManager
@@ -114,3 +119,49 @@ async def test_skips_quietly_when_platform_does_not_support_proactive_sends(tmp_
     await run_scheduled_task(engine, platform, "111", "222", "summarize vocab")
 
     assert platform.replies == []
+
+
+def test_append_scheduled_task_creates_file_and_is_readable_back(tmp_path):
+    task = ScheduledTask(
+        platform="discord", channel_id="111", user_id="222", time="09:00", prompt="hi", timezone="UTC"
+    )
+
+    append_scheduled_task(tmp_path, task)
+
+    loaded = load_scheduled_tasks(tmp_path)
+    assert loaded == [task]
+
+
+def test_append_scheduled_task_twice_keeps_both_entries(tmp_path):
+    first = ScheduledTask(platform="discord", channel_id="1", user_id="1", time="09:00", prompt="one")
+    second = ScheduledTask(platform="discord", channel_id="2", user_id="2", time="10:00", prompt="two")
+
+    append_scheduled_task(tmp_path, first)
+    append_scheduled_task(tmp_path, second)
+
+    assert load_scheduled_tasks(tmp_path) == [first, second]
+
+
+def test_append_scheduled_task_escapes_special_characters_in_prompt(tmp_path):
+    task = ScheduledTask(
+        platform="discord",
+        channel_id="1",
+        user_id="1",
+        time="09:00",
+        prompt='has "quotes", a\nnewline, and a \\backslash',
+    )
+
+    append_scheduled_task(tmp_path, task)
+
+    assert load_scheduled_tasks(tmp_path) == [task]
+
+
+def test_append_scheduled_task_preserves_existing_file_content(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text("# a hand-written comment\n")
+    task = ScheduledTask(platform="discord", channel_id="1", user_id="1", time="09:00", prompt="hi")
+
+    append_scheduled_task(tmp_path, task)
+
+    assert path.read_text().startswith("# a hand-written comment\n")
+    assert load_scheduled_tasks(tmp_path) == [task]

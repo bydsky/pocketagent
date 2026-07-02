@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Callable
 
 from .agent import Agent
@@ -12,6 +13,8 @@ from .commands import CommandRegistry
 from .platform import Platform
 from .utils import format_duration, parse_relative_duration
 from .router import ResolvedRoute, Router
+from .schedule_requests import SCHEDULE_TASK_INSTRUCTIONS, ScheduleRequestError, extract_schedule_requests
+from .scheduled_tasks import ScheduledTask, append_scheduled_task
 from .scheduler import OneShotScheduler
 from .session_store import SessionStore
 from .types import Event, EventType, Message
@@ -63,11 +66,18 @@ class Engine:
         routers: dict[str, Router],
         session_store: SessionStore,
         commands: CommandRegistry,
+        scheduled_tasks_dir: Path | None = None,
     ) -> None:
         self.agents = agents
         self.routers = routers
         self.session_store = session_store
         self.commands = commands
+        # Where to append scheduled_tasks.toml entries requested by an agent
+        # via a ```schedule-task``` block in its reply -- see
+        # core/schedule_requests.py. None disables the feature entirely (no
+        # system-prompt instructions, and any such block found is reported
+        # back as an error instead of being actioned).
+        self._scheduled_tasks_dir = scheduled_tasks_dir
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Usage-limit backlog: keyed by agent_name, since the underlying limit
         # is account-wide (shared by every channel routed to that agent), not
@@ -132,12 +142,20 @@ class Engine:
             await self._queue_for_retry(route.agent_name, platform, msg, timer.run_at)
             return
 
+        platform_system_prompt = route.platform_system_prompt
+        if self._scheduled_tasks_dir is not None:
+            platform_system_prompt = (
+                f"{platform_system_prompt}\n\n{SCHEDULE_TASK_INSTRUCTIONS}"
+                if platform_system_prompt
+                else SCHEDULE_TASK_INSTRUCTIONS
+            )
+
         async with platform.typing(msg.reply_ctx):
             session = await self.session_store.get_or_create(
                 msg.session_key,
                 agent,
                 str(route.work_dir),
-                route.platform_system_prompt,
+                platform_system_prompt,
                 route.show_footer,
             )
             prompt = msg.content
@@ -163,6 +181,7 @@ class Engine:
                         await platform.reply(msg.reply_ctx, f"Error: {error_text}")
                         return
                     final_text = "".join(text_parts) or event.content
+                    final_text = self._apply_schedule_requests(final_text, msg)
                     footer = _format_footer(event) if route.show_footer else ""
                     if footer:
                         final_text = f"{final_text}\n\n{footer}" if final_text else footer
@@ -170,6 +189,46 @@ class Engine:
                         await platform.reply(msg.reply_ctx, final_text)
                     self._maybe_mark_rate_limited_from_usage(route.agent_name, event)
                     return
+
+    def _apply_schedule_requests(self, text: str, msg: Message) -> str:
+        """Strip any ```schedule-task``` blocks out of `text` and act on them.
+
+        platform/channel_id/user_id come from `msg` (the real incoming
+        message), never from the block itself, so the agent can only ever
+        schedule into the channel/user it's actually replying to.
+        """
+
+        cleaned, requests = extract_schedule_requests(text)
+        if not requests:
+            return text
+
+        notes: list[str] = []
+        for request in requests:
+            if isinstance(request, ScheduleRequestError):
+                notes.append(f"Couldn't schedule that: {request.detail}")
+                continue
+            if self._scheduled_tasks_dir is None:
+                notes.append("Couldn't schedule that: scheduled tasks aren't configured on this server.")
+                continue
+            task = ScheduledTask(
+                platform=msg.platform,
+                channel_id=msg.channel_id,
+                user_id=msg.user_id,
+                time=request.time,
+                prompt=request.prompt,
+                timezone=request.timezone,
+            )
+            try:
+                append_scheduled_task(self._scheduled_tasks_dir, task)
+            except OSError:
+                logger.exception("failed to append scheduled task")
+                notes.append("Couldn't schedule that: failed to save it.")
+                continue
+            when = f"{request.time} {request.timezone}".strip()
+            notes.append(f"Scheduled daily at {when}.")
+
+        note_text = "\n".join(notes)
+        return f"{cleaned}\n\n{note_text}" if cleaned else note_text
 
     async def _run_exec(self, command: str, work_dir: str) -> str:
         proc = await asyncio.create_subprocess_shell(

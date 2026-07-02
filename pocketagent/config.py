@@ -15,6 +15,7 @@ from .core.commands import CommandRegistry, CustomCommand
 from .core.engine import Engine
 from .core.platform import Platform
 from .core.router import ChannelOverride, Router
+from .core.scheduled_tasks import ScheduledTask, load_scheduled_tasks
 from .core.session_store import SessionStore
 from .core.workspace import WorkspaceManager
 
@@ -29,28 +30,12 @@ class PlatformConfig:
 
 
 @dataclass
-class ScheduledTask:
-    """A prompt fired into one (platform, channel_id, user_id) session once a
-    day, with the reply posted proactively to that channel -- see
-    core/scheduled_tasks.py. Naturally pairs with [daily_reset]: schedule the
-    task for just before the channel's reset time so the prompt still sees
-    that day's conversation before it's cleared.
-    """
-
-    platform: str
-    channel_id: str
-    user_id: str
-    time: str
-    prompt: str
-    timezone: str = ""
-
-
-@dataclass
 class AppConfig:
     state_dir: str
     platforms: dict[str, PlatformConfig]
     agent_options: dict[str, dict[str, Any]]
     commands: CommandRegistry
+    config_dir: Path = Path(".")
     daily_reset_time: str = ""
     daily_reset_timezone: str = ""
     scheduled_tasks: list[ScheduledTask] = field(default_factory=list)
@@ -99,23 +84,15 @@ def load_config(path: str | Path) -> AppConfig:
 
     daily_reset = data.get("daily_reset", {})
 
-    scheduled_tasks = [
-        ScheduledTask(
-            platform=raw["platform"],
-            channel_id=str(raw["channel_id"]),
-            user_id=str(raw["user_id"]),
-            time=raw["time"],
-            prompt=raw["prompt"],
-            timezone=raw.get("timezone", ""),
-        )
-        for raw in data.get("scheduled_tasks", [])
-    ]
+    config_dir = Path(path).parent
+    scheduled_tasks = load_scheduled_tasks(config_dir)
 
     return AppConfig(
         state_dir=state_dir,
         platforms=platforms,
         agent_options=data.get("agents", {}),
         commands=commands,
+        config_dir=config_dir,
         daily_reset_time=daily_reset.get("time", ""),
         daily_reset_timezone=daily_reset.get("timezone", ""),
         scheduled_tasks=scheduled_tasks,
@@ -298,5 +275,11 @@ def build_app(config: AppConfig) -> tuple[dict[str, Platform], Engine]:
         )
 
     session_store = SessionStore(Path(config.state_dir) / "sessions.json")
-    engine = Engine(agents=agents, routers=routers, session_store=session_store, commands=config.commands)
+    engine = Engine(
+        agents=agents,
+        routers=routers,
+        session_store=session_store,
+        commands=config.commands,
+        scheduled_tasks_dir=config.config_dir,
+    )
     return platforms, engine

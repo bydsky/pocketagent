@@ -5,12 +5,15 @@ e.g. a nightly "summarize today's new vocabulary" digest.
 Reuses Engine.on_message end-to-end (session locking, footer, the
 usage-limit backlog) by constructing a synthetic Message whose reply_ctx
 comes from Platform.make_channel_ctx rather than a real inbound message --
-see core/platform.py and config.ScheduledTask.
+see core/platform.py and ScheduledTask below.
 """
 
 from __future__ import annotations
 
 import logging
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .types import Message
@@ -20,6 +23,95 @@ if TYPE_CHECKING:
     from .platform import Platform
 
 logger = logging.getLogger(__name__)
+
+SCHEDULED_TASKS_FILENAME = "scheduled_tasks.toml"
+
+
+@dataclass
+class ScheduledTask:
+    """A prompt fired into one (platform, channel_id, user_id) session once a
+    day, with the reply posted proactively to that channel. Naturally pairs
+    with [daily_reset] (config.py): schedule the task for just before the
+    channel's reset time so the prompt still sees that day's conversation
+    before it's cleared.
+    """
+
+    platform: str
+    channel_id: str
+    user_id: str
+    time: str
+    prompt: str
+    timezone: str = ""
+
+
+def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
+    """Load `[[scheduled_tasks]]` from `scheduled_tasks.toml` next to the main config.
+
+    Kept in its own file (unlike the rest of AppConfig) so it can be safely
+    hot-reloaded on its own -- see `_reload_task_schedulers` in `__main__.py`
+    -- without re-reading the main config file's platform tokens/secrets.
+    """
+
+    path = Path(config_dir) / SCHEDULED_TASKS_FILENAME
+    if not path.exists():
+        return []
+    data = tomllib.loads(path.read_text())
+    return [
+        ScheduledTask(
+            platform=raw["platform"],
+            channel_id=str(raw["channel_id"]),
+            user_id=str(raw["user_id"]),
+            time=raw["time"],
+            prompt=raw["prompt"],
+            timezone=raw.get("timezone", ""),
+        )
+        for raw in data.get("scheduled_tasks", [])
+    ]
+
+
+def _toml_string(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
+def format_scheduled_task_toml(task: ScheduledTask) -> str:
+    lines = [
+        "[[scheduled_tasks]]",
+        f"platform = {_toml_string(task.platform)}",
+        f"channel_id = {_toml_string(task.channel_id)}",
+        f"user_id = {_toml_string(task.user_id)}",
+        f"time = {_toml_string(task.time)}",
+    ]
+    if task.timezone:
+        lines.append(f"timezone = {_toml_string(task.timezone)}")
+    lines.append(f"prompt = {_toml_string(task.prompt)}")
+    return "\n".join(lines) + "\n"
+
+
+def append_scheduled_task(config_dir: str | Path, task: ScheduledTask) -> None:
+    """Append `task` to scheduled_tasks.toml as a new `[[scheduled_tasks]]` block.
+
+    Appends raw text instead of rewriting the whole file so any existing
+    entries/comments/formatting are left untouched -- lets Engine (see
+    core/schedule_requests.py) grant an agent the ability to add a scheduled
+    task on a user's behalf without needing a real TOML writer. Runs
+    synchronously with no `await` points, so it's safe to call without a
+    lock from an asyncio event loop -- nothing else can interleave a
+    concurrent write mid-call.
+    """
+
+    path = Path(config_dir) / SCHEDULED_TASKS_FILENAME
+    needs_separator = path.exists() and path.stat().st_size > 0
+    with path.open("a", encoding="utf-8") as f:
+        if needs_separator:
+            f.write("\n")
+        f.write(format_scheduled_task_toml(task))
 
 
 async def run_scheduled_task(

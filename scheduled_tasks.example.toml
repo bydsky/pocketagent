@@ -1,0 +1,35 @@
+# scheduled_tasks.example.toml
+#
+# Optional. Fires a prompt into a specific channel's existing session once a
+# day and posts the reply proactively -- e.g. a nightly digest. Reuses that
+# channel's conversation history (via the agent's --resume), so it's skipped
+# entirely if the channel has no session yet. Repeat [[scheduled_tasks]] for
+# more than one. Schedule it just before that channel's daily_reset time (if
+# any, see [daily_reset] in pocketagent.toml) so the prompt still sees that
+# day's conversation before it's cleared.
+#
+# This file must be named scheduled_tasks.toml and live next to the main
+# pocketagent.toml passed via `-c`/`--config`. It's kept separate so it can
+# be hot-reloaded on its own without re-reading the main config's platform
+# tokens/secrets: the running process polls this file's mtime every 30s and
+# automatically reloads its schedules on change -- no signal or restart
+# needed. (Contrast with [daily_reset] in pocketagent.toml, which still
+# needs a SIGHUP to reload since re-reading that file means re-reading
+# secrets too.)
+
+# [[scheduled_tasks]]
+# platform = "discord"
+# channel_id = "123456789012345678"
+# user_id = "234567890123456789"   # whose session to use (sessions are per
+                                    # channel+user -- see session_key)
+# time = "21:00"
+# timezone = ""                    # IANA name; omit to use the host's local timezone
+# prompt = "Summarize all new vocabulary words discussed in this channel today."
+
+# Entries here don't have to be hand-written: an agent can add one itself,
+# mid-conversation, by including a fenced ```schedule-task``` block in its
+# reply (see core/schedule_requests.py). pocketagent tells the agent about
+# this convention automatically, so a user can just say "remind me every day
+# at 9am to check the deploy" and the agent will append the equivalent of
+# the block above on its own -- with platform/channel_id/user_id always
+# taken from that actual conversation, never from anything the agent wrote.
