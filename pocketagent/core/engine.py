@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from .agent import Agent
-from .commands import CommandRegistry, parse_command_text
+from .commands import CommandRegistry, CustomCommand
 from .platform import Platform
 from .utils import format_duration, parse_relative_duration
 from .router import ResolvedRoute, Router
@@ -66,6 +66,13 @@ def _format_eta(retry_at: datetime) -> str:
 
 
 class Engine:
+    # Names of the built-in /scheduled and /unschedule commands registered
+    # by _register_builtin_commands -- a user's own custom command of the
+    # same name takes precedence (that check lives in
+    # _register_builtin_commands itself).
+    _LIST_SCHEDULED_COMMAND = "scheduled"
+    _UNSCHEDULE_COMMAND = "unschedule"
+
     def __init__(
         self,
         agents: dict[str, Agent],
@@ -81,9 +88,12 @@ class Engine:
         # Where to append scheduled_tasks.toml entries requested by an agent
         # via a ```schedule-task``` block in its reply -- see
         # core/schedule_requests.py. None disables the feature entirely (no
-        # system-prompt instructions, and any such block found is reported
-        # back as an error instead of being actioned).
+        # system-prompt instructions, no /scheduled or /unschedule commands,
+        # and any schedule-task-family block found is reported back as an
+        # error instead of being actioned).
         self._scheduled_tasks_dir = scheduled_tasks_dir
+        if scheduled_tasks_dir is not None:
+            self._register_builtin_commands()
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Usage-limit backlog: keyed by agent_name, since the underlying limit
         # is account-wide (shared by every channel routed to that agent), not
@@ -125,31 +135,40 @@ class Engine:
         async with lock:
             await self._handle_locked(platform, msg, route)
 
-    # Names of the built-in /scheduled and /unschedule commands (see
-    # _handle_locked) -- not configurable, but a user's own custom command
-    # of the same name takes precedence (checked via self.commands.resolve).
-    _LIST_SCHEDULED_COMMAND = "scheduled"
-    _UNSCHEDULE_COMMAND = "unschedule"
+    def _register_builtin_commands(self) -> None:
+        """Register /scheduled and /unschedule as real CommandRegistry entries.
+
+        Unlike the hardcoded-in-Engine approach this replaced, going through
+        CommandRegistry means platforms that list `commands.all()` to
+        register real slash commands / autocomplete (Discord, Telegram) pick
+        these up automatically too. Skipped per-name if the user already
+        defined their own command of that name in config -- theirs wins.
+        """
+
+        if self.commands.resolve(self._LIST_SCHEDULED_COMMAND) is None:
+            self.commands.add(
+                CustomCommand(
+                    name=self._LIST_SCHEDULED_COMMAND,
+                    builtin="list_scheduled_tasks",
+                    description="List scheduled tasks for this conversation",
+                )
+            )
+        if self.commands.resolve(self._UNSCHEDULE_COMMAND) is None:
+            self.commands.add(
+                CustomCommand(
+                    name=self._UNSCHEDULE_COMMAND,
+                    builtin="remove_scheduled_task",
+                    description="Remove a scheduled task by id",
+                )
+            )
 
     async def _handle_locked(self, platform: Platform, msg: Message, route: ResolvedRoute) -> None:
-        parsed_command = parse_command_text(msg.content)
-        if parsed_command is not None:
-            name, args = parsed_command
-            if name == self._LIST_SCHEDULED_COMMAND and self.commands.resolve(name) is None:
-                await platform.reply(msg.reply_ctx, self._list_scheduled_tasks_text(msg))
-                return
-            if name == self._UNSCHEDULE_COMMAND and self.commands.resolve(name) is None:
-                if not args:
-                    await platform.reply(
-                        msg.reply_ctx, f"Usage: /{self._UNSCHEDULE_COMMAND} <id> -- see /{self._LIST_SCHEDULED_COMMAND} for ids."
-                    )
-                    return
-                await platform.reply(msg.reply_ctx, self._remove_scheduled_task_text(msg, args[0]))
-                return
-
         expanded = self.commands.expand(msg.content)
         if expanded is not None:
             cmd, expanded_text = expanded
+            if cmd.builtin is not None:
+                await self._handle_builtin_command(cmd, expanded_text, platform, msg)
+                return
             if cmd.exec is not None:
                 async with platform.typing(msg.reply_ctx):
                     output = await self._run_exec(expanded_text, str(route.work_dir))
@@ -330,6 +349,24 @@ class Engine:
         if removed:
             return f"Removed scheduled task (id: {task_id})."
         return f"Couldn't find a scheduled task with id '{task_id}' in this conversation."
+
+    async def _handle_builtin_command(
+        self, cmd: CustomCommand, args_text: str, platform: Platform, msg: Message
+    ) -> None:
+        if cmd.builtin == "list_scheduled_tasks":
+            await platform.reply(msg.reply_ctx, self._list_scheduled_tasks_text(msg))
+            return
+        if cmd.builtin == "remove_scheduled_task":
+            args = args_text.split()
+            if not args:
+                await platform.reply(
+                    msg.reply_ctx,
+                    f"Usage: /{self._UNSCHEDULE_COMMAND} <id> -- see /{self._LIST_SCHEDULED_COMMAND} for ids.",
+                )
+                return
+            await platform.reply(msg.reply_ctx, self._remove_scheduled_task_text(msg, args[0]))
+            return
+        raise AssertionError(f"unknown builtin command {cmd.builtin!r}")
 
     async def _run_exec(self, command: str, work_dir: str) -> str:
         proc = await asyncio.create_subprocess_shell(

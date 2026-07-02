@@ -77,3 +77,8 @@
 # all -- typed directly by a user, always scoped to that same conversation:
 #   /scheduled           -- list scheduled tasks for this channel/user
 #   /unschedule <id>      -- remove one, by the id shown in the listing
+# Engine registers these into the same CommandRegistry as [commands.*] in
+# pocketagent.toml (see Engine._register_builtin_commands in core/engine.py),
+# so they also show up as real Discord slash commands and in Telegram's
+# autocomplete -- unless you've defined your own [commands.scheduled] or
+# [commands.unschedule], in which case yours wins.

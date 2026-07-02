@@ -1,9 +1,14 @@
-"""Custom slash commands: config-defined prompt templates or shell commands.
+"""Custom slash commands: config-defined prompt templates or shell commands,
+plus a handful of built-in commands Engine registers itself (e.g. /scheduled,
+/unschedule -- see Engine._register_builtin_commands in core/engine.py).
 
-A command is declared once in config (name + a prompt template, or a shell
-`exec` string) and expanded against the user's typed arguments into a normal
-prompt that gets sent to the agent like any other message -- there is no
-separate command-handler dispatch layer.
+A prompt/exec command is declared once in config (name + a prompt template,
+or a shell `exec` string) and expanded against the user's typed arguments
+into a normal prompt that gets sent to the agent like any other message --
+there is no separate command-handler dispatch layer for those two kinds. A
+`builtin` command instead carries an opaque tag Engine switches on to run
+its own Python logic (not user-configurable; Engine only registers one if
+the user hasn't already defined a command of that same name).
 
 Placeholder syntax in `prompt` templates:
     {{1}}, {{2}}, ...   1-based positional argument
@@ -36,15 +41,20 @@ class CustomCommand:
     exec: str | None = None
     work_dir: str | None = None
     description: str = ""
+    # Opaque tag for a built-in command Engine implements itself (e.g.
+    # "list_scheduled_tasks"), as opposed to a user-configured prompt/exec.
+    # Never set from user config -- see core/engine.py.
+    builtin: str | None = None
 
     def __post_init__(self) -> None:
         # exec="" is a deliberate, valid value (e.g. a /shell passthrough
         # command with no fixed prefix) -- distinct from exec unset (None) --
         # so these checks use "is None", not truthiness.
-        if not self.prompt and self.exec is None:
-            raise ValueError(f"command {self.name!r} needs either prompt or exec")
-        if self.prompt and self.exec is not None:
-            raise ValueError(f"command {self.name!r} cannot set both prompt and exec")
+        kinds = [bool(self.prompt), self.exec is not None, self.builtin is not None]
+        if not any(kinds):
+            raise ValueError(f"command {self.name!r} needs one of prompt, exec, or builtin")
+        if sum(kinds) > 1:
+            raise ValueError(f"command {self.name!r} can only set one of prompt, exec, or builtin")
 
 
 def expand_prompt(template: str, args: list[str]) -> str:
@@ -129,7 +139,10 @@ class CommandRegistry:
         verbatim instead of args re-joined with single spaces, so quoting
         (e.g. `/shell grep "foo bar" file.txt`) survives into the shell
         command unchanged -- shlex.split()/' '.join() round-tripping would
-        otherwise silently flatten "foo bar" into two bare words.
+        otherwise silently flatten "foo bar" into two bare words. For a
+        builtin command the second element is just the args re-joined with
+        single spaces -- Engine re-splits them itself if it needs them
+        individually (see Engine._handle_builtin_command).
         Returns None if content isn't a registered command.
         """
 
@@ -140,6 +153,8 @@ class CommandRegistry:
         cmd = self.resolve(name)
         if cmd is None:
             return None
+        if cmd.builtin is not None:
+            return cmd, " ".join(args)
         if cmd.prompt is not None:
             return cmd, expand_prompt(cmd.prompt, args)
         assert cmd.exec is not None

@@ -559,16 +559,22 @@ async def test_scheduled_command_reports_none_when_empty(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_scheduled_command_reports_not_configured(tmp_path):
+async def test_scheduled_command_not_registered_when_not_configured(tmp_path):
+    # scheduled_tasks_dir=None means the feature is fully off: /scheduled/
+    # /unschedule are never registered as commands, so "/scheduled" falls
+    # through to the agent like any other unrecognized command text.
     engine, agent = _make_engine(tmp_path)
+    assert engine.commands.resolve("scheduled") is None
+    assert engine.commands.resolve("unschedule") is None
+
     platform = _FakePlatform()
     msg = _make_message()
     msg.content = "/scheduled"
 
     await engine.on_message(platform, msg)
 
-    assert agent.start_session_calls == 0
-    assert "aren't configured" in platform.replies[0]
+    assert agent.start_session_calls == 1
+    assert platform.replies == ["ok"]
 
 
 @pytest.mark.asyncio

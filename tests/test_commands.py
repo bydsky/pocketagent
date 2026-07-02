@@ -69,6 +69,43 @@ def test_custom_command_rejects_both_prompt_and_exec():
         CustomCommand(name="bad", prompt="x", exec="y")
 
 
+def test_custom_command_allows_builtin_alone():
+    CustomCommand(name="scheduled", builtin="list_scheduled_tasks")  # doesn't raise
+
+
+def test_custom_command_rejects_builtin_with_prompt():
+    import pytest
+
+    with pytest.raises(ValueError):
+        CustomCommand(name="bad", prompt="x", builtin="list_scheduled_tasks")
+
+
+def test_custom_command_rejects_builtin_with_exec():
+    import pytest
+
+    with pytest.raises(ValueError):
+        CustomCommand(name="bad", exec="y", builtin="list_scheduled_tasks")
+
+
+def test_registry_expand_builtin_command_returns_joined_args():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="unschedule", builtin="remove_scheduled_task"))
+    result = registry.expand("/unschedule abc123")
+    assert result is not None
+    cmd, expanded = result
+    assert cmd.builtin == "remove_scheduled_task"
+    assert expanded == "abc123"
+
+
+def test_registry_expand_builtin_command_with_no_args():
+    registry = CommandRegistry()
+    registry.add(CustomCommand(name="scheduled", builtin="list_scheduled_tasks"))
+    result = registry.expand("/scheduled")
+    assert result is not None
+    cmd, expanded = result
+    assert expanded == ""
+
+
 def test_registry_expand_prompt_command():
     registry = CommandRegistry()
     registry.add(
