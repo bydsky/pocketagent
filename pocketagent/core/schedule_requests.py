@@ -7,7 +7,16 @@
     prompt = "Check on the build and report status."
     ```
 
-or, for a recurring interval instead of a fixed daily time:
+for a specific weekday (optionally every N weeks instead of every week):
+
+    ```schedule-task
+    time = "19:00"
+    weekday = "thursday"
+    interval_weeks = 2
+    prompt = "Check on the build and report status."
+    ```
+
+or, for a recurring interval instead of a fixed daily/weekly time:
 
     ```schedule-task
     every = "2h"
@@ -28,7 +37,7 @@ import re
 import tomllib
 from dataclasses import dataclass
 
-from .scheduler import parse_time_of_day
+from .scheduler import parse_time_of_day, parse_weekday
 from .utils import parse_relative_duration
 
 _BLOCK_RE = re.compile(r"```schedule-task\s*\n(.*?)```", re.DOTALL)
@@ -46,18 +55,30 @@ prompt = "..."
 ```
 
 ```schedule-task
+time = "HH:MM"
+weekday = "thursday"
+interval_weeks = 1
+prompt = "..."
+```
+
+```schedule-task
 every = "2h"
 prompt = "..."
 ```
 
 `prompt` (what to send yourself, reusing this conversation's history) is
-always required, plus exactly one of: `time` (24h "HH:MM", for once a day --
-`timezone` is an IANA name and may be omitted to use the local timezone) or
-`every` (a recurring interval such as "30m", "2h", or "1d", for repeating
-every that often starting from now). Only include this block when the user
-actually wants something scheduled -- it will be removed from what the user
-sees and replaced with a confirmation, so don't also describe its syntax to
-them."""
+always required, plus exactly one of:
+- `time` (24h "HH:MM") for once a day -- `timezone` is an IANA name and may
+  be omitted to use the local timezone. Add `weekday` (e.g. "thursday") to
+  instead fire once a week on that day, and `interval_weeks` (default 1) to
+  make it every 2nd/3rd/... week instead of every week.
+- `every`, a recurring interval such as "30m", "2h", or "1d", for repeating
+  every that often starting from now (not combinable with `weekday`/
+  `interval_weeks`).
+
+Only include this block when the user actually wants something scheduled --
+it will be removed from what the user sees and replaced with a confirmation,
+so don't also describe its syntax to them."""
 
 
 @dataclass
@@ -65,6 +86,8 @@ class ScheduleRequest:
     prompt: str
     time: str = ""
     timezone: str = ""
+    weekday: str = ""
+    interval_weeks: int = 1
     every: str = ""
 
 
@@ -106,9 +129,17 @@ def _parse_block(body: str) -> ScheduleRequest | ScheduleRequestError:
     if not isinstance(time_str, str) or not isinstance(every, str):
         return ScheduleRequestError("schedule-task block's 'time'/'every' must be strings")
     if bool(time_str) == bool(every):
-        return ScheduleRequestError("schedule-task block needs exactly one of 'time' (daily) or 'every' (interval)")
+        return ScheduleRequestError(
+            "schedule-task block needs exactly one of 'time' (daily/weekly) or 'every' (interval)"
+        )
 
     if every:
+        weekday = data.get("weekday", "")
+        interval_weeks = data.get("interval_weeks", 1)
+        if weekday or interval_weeks != 1:
+            return ScheduleRequestError(
+                "schedule-task block can't combine 'every' with 'weekday'/'interval_weeks' (those only apply to 'time')"
+            )
         if parse_relative_duration(every) is None:
             return ScheduleRequestError(
                 f'schedule-task block has an invalid "every" {every!r} (expected e.g. "2h", "30m", "1d")'
@@ -124,4 +155,21 @@ def _parse_block(body: str) -> ScheduleRequest | ScheduleRequestError:
     if not isinstance(timezone, str):
         return ScheduleRequestError("schedule-task block's 'timezone' must be a string")
 
-    return ScheduleRequest(time=time_str, prompt=prompt, timezone=timezone)
+    weekday = data.get("weekday", "")
+    if not isinstance(weekday, str):
+        return ScheduleRequestError("schedule-task block's 'weekday' must be a string")
+    if weekday:
+        try:
+            parse_weekday(weekday)
+        except ValueError as exc:
+            return ScheduleRequestError(f"schedule-task block: {exc}")
+
+    interval_weeks = data.get("interval_weeks", 1)
+    if not isinstance(interval_weeks, int) or isinstance(interval_weeks, bool) or interval_weeks < 1:
+        return ScheduleRequestError("schedule-task block's 'interval_weeks' must be a positive integer")
+    if interval_weeks != 1 and not weekday:
+        return ScheduleRequestError("schedule-task block's 'interval_weeks' only applies alongside 'weekday'")
+
+    return ScheduleRequest(
+        time=time_str, prompt=prompt, timezone=timezone, weekday=weekday, interval_weeks=interval_weeks
+    )

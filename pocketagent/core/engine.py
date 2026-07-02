@@ -217,6 +217,8 @@ class Engine:
                 prompt=request.prompt,
                 time=request.time,
                 timezone=request.timezone,
+                weekday=request.weekday,
+                interval_weeks=request.interval_weeks,
                 every=request.every,
             )
             try:
@@ -227,6 +229,10 @@ class Engine:
                 continue
             if request.every:
                 notes.append(f"Scheduled every {request.every}.")
+            elif request.weekday:
+                cadence = "every week" if request.interval_weeks == 1 else f"every {request.interval_weeks} weeks"
+                when = f"{request.time} {request.timezone}".strip()
+                notes.append(f"Scheduled {cadence} on {request.weekday.capitalize()} at {when}.")
             else:
                 when = f"{request.time} {request.timezone}".strip()
                 notes.append(f"Scheduled daily at {when}.")

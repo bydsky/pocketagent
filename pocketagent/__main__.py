@@ -10,12 +10,12 @@ from pathlib import Path
 
 from .config import build_app, build_reset_groups, load_config
 from .core.scheduled_tasks import SCHEDULED_TASKS_FILENAME, load_scheduled_tasks, run_scheduled_task
-from .core.scheduler import DailyScheduler, IntervalScheduler
+from .core.scheduler import DailyScheduler, IntervalScheduler, WeeklyScheduler
 from .core.utils import parse_relative_duration
 
 SCHEDULED_TASKS_POLL_INTERVAL = 30.0
 
-TaskScheduler = DailyScheduler | IntervalScheduler
+TaskScheduler = DailyScheduler | WeeklyScheduler | IntervalScheduler
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -58,6 +58,10 @@ def _build_task_schedulers(scheduled_tasks, platforms, engine) -> list[TaskSched
                 logging.warning("scheduled_tasks: invalid 'every' %r, skipping", task.every)
                 continue
             schedulers.append(IntervalScheduler(interval, callback))
+        elif task.weekday:
+            schedulers.append(
+                WeeklyScheduler(task.time, task.weekday, callback, task.timezone, task.interval_weeks)
+            )
         else:
             schedulers.append(DailyScheduler(task.time, callback, task.timezone))
     return schedulers

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .scheduler import parse_weekday
 from .types import Message
 from .utils import parse_relative_duration
 
@@ -33,14 +34,20 @@ SCHEDULED_TASKS_FILENAME = "scheduled_tasks.toml"
 class ScheduledTask:
     """A prompt fired into one (platform, channel_id, user_id) session on a
     schedule, with the reply posted proactively to that channel. Exactly one
-    of `time` (a fixed daily "HH:MM", paired with `timezone`) or `every` (a
-    recurring interval like "2h"/"30m"/"1d", parsed by
-    core.utils.parse_relative_duration) must be set -- see
-    `_build_task_schedulers` in `__main__.py` for which of DailyScheduler /
-    IntervalScheduler that becomes. A daily task naturally pairs with
-    [daily_reset] (config.py): schedule it for just before the channel's
-    reset time so the prompt still sees that day's conversation before it's
-    cleared.
+    of `time` or `every` must be set:
+
+    - `time` ("HH:MM", paired with `timezone`) -- daily by itself, or
+      weekly/every-N-weeks if `weekday` (e.g. "thursday") is also set, with
+      `interval_weeks` (default 1) picking every 1st/2nd/3rd/... week.
+    - `every` -- a recurring interval like "2h"/"30m"/"1d", parsed by
+      core.utils.parse_relative_duration; mutually exclusive with
+      `weekday`/`interval_weeks`.
+
+    See `_build_task_schedulers` in `__main__.py` for which of
+    DailyScheduler / WeeklyScheduler / IntervalScheduler that becomes. A
+    daily task naturally pairs with [daily_reset] (config.py): schedule it
+    for just before the channel's reset time so the prompt still sees that
+    day's conversation before it's cleared.
     """
 
     platform: str
@@ -49,6 +56,8 @@ class ScheduledTask:
     prompt: str
     time: str = ""
     timezone: str = ""
+    weekday: str = ""
+    interval_weeks: int = 1
     every: str = ""
 
 
@@ -68,17 +77,42 @@ def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
     for raw in data.get("scheduled_tasks", []):
         time_str = raw.get("time", "")
         every = raw.get("every", "")
+        weekday = raw.get("weekday", "")
+        interval_weeks = raw.get("interval_weeks", 1)
         channel_id = str(raw["channel_id"])
+
         if bool(time_str) == bool(every):
             raise ValueError(
                 f"scheduled_tasks: entry for channel_id={channel_id!r} needs exactly "
-                "one of 'time' (daily) or 'every' (interval)"
+                "one of 'time' (daily/weekly) or 'every' (interval)"
             )
-        if every and parse_relative_duration(every) is None:
+        if every:
+            if parse_relative_duration(every) is None:
+                raise ValueError(
+                    f"scheduled_tasks: entry for channel_id={channel_id!r} has an invalid "
+                    f"'every' {every!r} (expected e.g. \"2h\", \"30m\", \"1d\")"
+                )
+            if weekday or interval_weeks != 1:
+                raise ValueError(
+                    f"scheduled_tasks: entry for channel_id={channel_id!r} can't combine "
+                    "'every' with 'weekday'/'interval_weeks' (those only apply to 'time')"
+                )
+        if weekday:
+            try:
+                parse_weekday(weekday)
+            except ValueError as exc:
+                raise ValueError(f"scheduled_tasks: entry for channel_id={channel_id!r}: {exc}") from exc
+        if not isinstance(interval_weeks, int) or isinstance(interval_weeks, bool) or interval_weeks < 1:
             raise ValueError(
                 f"scheduled_tasks: entry for channel_id={channel_id!r} has an invalid "
-                f"'every' {every!r} (expected e.g. \"2h\", \"30m\", \"1d\")"
+                f"'interval_weeks' {interval_weeks!r} (expected a positive integer)"
             )
+        if interval_weeks != 1 and not weekday:
+            raise ValueError(
+                f"scheduled_tasks: entry for channel_id={channel_id!r}: 'interval_weeks' only "
+                "applies alongside 'weekday'"
+            )
+
         tasks.append(
             ScheduledTask(
                 platform=raw["platform"],
@@ -87,6 +121,8 @@ def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
                 prompt=raw["prompt"],
                 time=time_str,
                 timezone=raw.get("timezone", ""),
+                weekday=weekday,
+                interval_weeks=interval_weeks,
                 every=every,
             )
         )
@@ -117,6 +153,10 @@ def format_scheduled_task_toml(task: ScheduledTask) -> str:
         lines.append(f"time = {_toml_string(task.time)}")
         if task.timezone:
             lines.append(f"timezone = {_toml_string(task.timezone)}")
+        if task.weekday:
+            lines.append(f"weekday = {_toml_string(task.weekday)}")
+        if task.interval_weeks != 1:
+            lines.append(f"interval_weeks = {task.interval_weeks}")
     lines.append(f"prompt = {_toml_string(task.prompt)}")
     return "\n".join(lines) + "\n"
 

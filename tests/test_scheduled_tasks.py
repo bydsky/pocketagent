@@ -223,3 +223,82 @@ def test_load_scheduled_tasks_rejects_invalid_every(tmp_path):
     )
     with pytest.raises(ValueError):
         load_scheduled_tasks(tmp_path)
+
+
+def test_append_and_load_weekly_task(tmp_path):
+    task = ScheduledTask(
+        platform="discord", channel_id="1", user_id="1", prompt="check in", time="19:00", weekday="thursday"
+    )
+
+    append_scheduled_task(tmp_path, task)
+
+    assert load_scheduled_tasks(tmp_path) == [task]
+
+
+def test_append_and_load_biweekly_task(tmp_path):
+    task = ScheduledTask(
+        platform="discord",
+        channel_id="1",
+        user_id="1",
+        prompt="check in",
+        time="19:00",
+        weekday="thursday",
+        interval_weeks=2,
+    )
+
+    append_scheduled_task(tmp_path, task)
+
+    contents = (tmp_path / "scheduled_tasks.toml").read_text()
+    assert "interval_weeks = 2" in contents
+    assert load_scheduled_tasks(tmp_path) == [task]
+
+
+def test_load_scheduled_tasks_rejects_unknown_weekday(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        time = "19:00"
+        weekday = "someday"
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)
+
+
+def test_load_scheduled_tasks_rejects_weekday_combined_with_every(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        every = "2h"
+        weekday = "thursday"
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)
+
+
+def test_load_scheduled_tasks_rejects_interval_weeks_without_weekday(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        time = "19:00"
+        interval_weeks = 2
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)

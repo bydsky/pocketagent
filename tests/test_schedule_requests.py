@@ -98,3 +98,39 @@ def test_extract_invalid_every_returns_error():
     cleaned, requests = extract_schedule_requests(text)
     assert isinstance(requests[0], ScheduleRequestError)
     assert "not-a-duration" in requests[0].detail
+
+
+def test_extract_valid_weekly_block():
+    text = '```schedule-task\ntime = "19:00"\nweekday = "thursday"\nprompt = "check in"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert cleaned == ""
+    assert requests == [ScheduleRequest(time="19:00", prompt="check in", weekday="thursday")]
+
+
+def test_extract_valid_biweekly_block():
+    text = (
+        '```schedule-task\ntime = "19:00"\nweekday = "thursday"\n'
+        'interval_weeks = 2\nprompt = "check in"\n```'
+    )
+    cleaned, requests = extract_schedule_requests(text)
+    assert requests == [
+        ScheduleRequest(time="19:00", prompt="check in", weekday="thursday", interval_weeks=2)
+    ]
+
+
+def test_extract_unknown_weekday_returns_error():
+    text = '```schedule-task\ntime = "19:00"\nweekday = "someday"\nprompt = "hi"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_interval_weeks_without_weekday_returns_error():
+    text = '```schedule-task\ntime = "19:00"\ninterval_weeks = 2\nprompt = "hi"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_weekday_combined_with_every_returns_error():
+    text = '```schedule-task\nevery = "2h"\nweekday = "thursday"\nprompt = "hi"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
