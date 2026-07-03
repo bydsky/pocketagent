@@ -8,9 +8,9 @@ writing, not hands-on testing. -->
 
 - **Chat is the terminal.** DM or @mention from Discord, Telegram, or Slack; the agent runs on your own machine — no public IP needed.
 - **Per-channel agents and workspaces.** One server, many channels — each pinned to its own agent (Claude Code, Codex, or any TUI via tmux), model, system prompt, and repo.
+- **Rate limits don't break the flow.** Hitting a usage limit queues incoming messages and auto-replays them in order when it resets, instead of erroring.
 - **The agent schedules itself.** It can add, list, and cancel its own recurring reminders and one-off nudges, mid-conversation — no separate cron file to babysit.
 - **Scheduled daily reset.** An optional cron wipes a channel's history on a schedule, so it doesn't drag weeks of stale context into every reply.
-- **Rate limits don't break the flow.** Hitting a usage limit queues incoming messages and auto-replays them in order when it resets, instead of erroring.
 - **Survives restarts.** Conversations resume where they left off via `--resume`.
 - **Yours to run.** A single self-hosted Python process. No hosted service, no telemetry.
 
