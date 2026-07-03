@@ -4,22 +4,6 @@ writing, not hands-on testing. -->
 
 # One Discord server, four coding agents, zero mixed context
 
-pocketagent bridges Discord, Telegram, and Slack to Claude Code, Codex, and any
-terminal-based CLI agent — so you can drive a coding session from your phone,
-and the agent can schedule its own follow-ups without you asking twice.
-
-*~6 min read · self-hosted, open source, Python*
-
----
-
-I kept having the same problem: Claude Code would be in the middle of
-something useful on my desktop, and I'd leave the house. Or I'd think of
-something at 11pm I wanted a coding agent to check on tomorrow morning, and by
-the time I sat back down at a terminal I'd forgotten. So I built
-**pocketagent** — a small bridge that sits between a chat platform and an
-agent CLI, so a Discord DM, a Telegram message, or a Slack thread *is* the
-terminal.
-
 **What it does, in short:**
 
 - **Chat is the terminal.** DM or @mention from Discord, Telegram, or Slack; the agent runs on your own machine — no public IP needed.
