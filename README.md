@@ -30,28 +30,40 @@ coding agent from a chat app.
   instead of erroring, and automatically replays them in order once the
   limit resets — no config needed. Held in memory only, so a restart during
   the limit window drops anything still queued.
-- **Scheduled tasks**: entries in a separate `scheduled_tasks.toml` (kept
-  apart from `pocketagent.toml`'s platform tokens) fire a prompt into a
-  specific channel's existing session and post the reply proactively — e.g.
-  a nightly "summarize today's new vocabulary" digest, a biweekly status
-  check, or a one-off reminder. Each entry is either a standard 5-field cron
-  expression (recurring, plus an optional `interval_weeks` for "every Nth
-  week") or a `run_at` timestamp (fires once, then the entry removes itself
-  — including auto-cleaning up an entry whose time already passed by the
-  time pocketagent (re)loads it, e.g. after downtime, rather than firing it
-  late). Reuses that channel's conversation history, and is skipped if the
-  channel has no session yet. The file is auto-reloaded (polled every 30s),
-  so edits take effect without a restart or signal. See
-  `scheduled_tasks.example.toml`.
-  - An agent can manage its own schedule mid-conversation — add, list, or
-    cancel — just by including a `schedule-task` / `list-scheduled-tasks` /
-    `remove-schedule-task` fenced block in a reply; pocketagent teaches it
-    this convention automatically, scoped so it can only ever touch tasks
-    tied to the channel/user it's actually replying to.
-  - `/scheduled` and `/unschedule <id>` work the same way without needing
-    the agent at all, and (unless you've defined your own commands of the
-    same name) show up as real Discord slash commands / Telegram
-    autocomplete alongside your configured `[commands.*]`.
+- **Scheduled tasks**: proactive prompts fired into a channel's session on a
+  schedule instead of in response to a message — see below.
+
+## Scheduled tasks
+
+Entries in a separate `scheduled_tasks.toml` (kept apart from
+`pocketagent.toml`'s platform tokens) fire a prompt into a specific
+channel's existing session and post the reply proactively — e.g. a nightly
+"summarize today's new vocabulary" digest, a biweekly status check, or a
+one-off reminder. Reuses that channel's conversation history, and is
+skipped if the channel has no session yet. See `scheduled_tasks.example.toml`
+for the full config shape.
+
+- **When it fires** — each entry is exactly one of:
+  - a standard 5-field **cron** expression, recurring forever, plus an
+    optional `interval_weeks` for "every Nth week" (cron itself has no such
+    concept); or
+  - a **`run_at`** timestamp (ISO 8601) that fires once, then the entry
+    removes itself — including auto-cleaning up an entry whose time already
+    passed by the time pocketagent (re)loads it (e.g. after downtime),
+    rather than firing it late.
+- **Reloading**: the file is auto-reloaded (polled every 30s), so edits take
+  effect without a restart or signal — unlike `[daily_reset]`, which needs a
+  `SIGHUP` since it lives in the main config alongside platform tokens.
+- **Agent self-management**: an agent can add, list, or cancel its own
+  schedule mid-conversation just by including a `schedule-task` /
+  `list-scheduled-tasks` / `remove-schedule-task` fenced block in a reply;
+  pocketagent teaches it this convention automatically, scoped so it can
+  only ever touch tasks tied to the channel/user it's actually replying to.
+- **Built-in commands**: `/scheduled` and `/unschedule <id>` do the same
+  (list / cancel) without needing the agent at all, and — unless you've
+  defined your own commands of the same name — show up as real Discord
+  slash commands / Telegram autocomplete alongside your configured
+  `[commands.*]`.
 
 ## Setup
 
