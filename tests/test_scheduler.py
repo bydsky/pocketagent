@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -8,9 +9,11 @@ from pocketagent.core.scheduler import (
     OneShotScheduler,
     next_cron_occurrence,
     next_occurrence,
+    parse_run_at,
     resolve_timezone,
     seconds_until_next_cron,
     validate_cron,
+    validate_run_at,
 )
 
 
@@ -165,3 +168,30 @@ def test_cron_scheduler_construction_rejects_invalid_cron():
 
     with pytest.raises(ValueError):
         CronScheduler("not a cron expression", callback)
+
+
+def test_validate_run_at_accepts_valid_iso_datetime():
+    validate_run_at("2026-07-05T09:00:00")  # doesn't raise
+
+
+def test_validate_run_at_rejects_invalid_string():
+    with pytest.raises(ValueError):
+        validate_run_at("not a datetime")
+
+
+def test_parse_run_at_without_timezone_stays_naive():
+    dt = parse_run_at("2026-07-05T09:00:00")
+    assert dt == datetime(2026, 7, 5, 9, 0, 0)
+    assert dt.tzinfo is None
+
+
+def test_parse_run_at_attaches_given_timezone_when_naive():
+    tz = ZoneInfo("America/New_York")
+    dt = parse_run_at("2026-07-05T09:00:00", tz)
+    assert dt == datetime(2026, 7, 5, 9, 0, 0, tzinfo=tz)
+
+
+def test_parse_run_at_keeps_own_offset_over_given_timezone():
+    tz = ZoneInfo("America/New_York")
+    dt = parse_run_at("2026-07-05T09:00:00+00:00", tz)
+    assert dt.utcoffset() == timedelta(0)

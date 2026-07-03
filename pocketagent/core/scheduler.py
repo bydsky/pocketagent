@@ -46,6 +46,34 @@ def resolve_timezone(name: str) -> ZoneInfo | None:
         return None
 
 
+def parse_run_at(value: str, tz: ZoneInfo | None = None) -> datetime:
+    """Parse an ISO 8601 datetime string (e.g. "2026-07-05T09:00:00") for a
+    one-shot ScheduledTask/OneShotScheduler.
+
+    If `value` already carries a UTC offset, that's used as-is and `tz` is
+    ignored; otherwise the parsed naive datetime is attached to `tz` (or
+    left naive, meaning system local time, if `tz` is None) -- mirroring how
+    CronScheduler's own `timezone` field is interpreted.
+
+    Raises ValueError (via datetime.fromisoformat) if `value` isn't a valid
+    ISO 8601 datetime.
+    """
+
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None and tz is not None:
+        dt = dt.replace(tzinfo=tz)
+    return dt
+
+
+def validate_run_at(value: str) -> None:
+    """Raise ValueError if `value` isn't a valid ISO 8601 datetime string."""
+
+    try:
+        datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"invalid run_at timestamp {value!r} ({exc})") from exc
+
+
 def next_occurrence(target: dt_time, tz: ZoneInfo | None, now: datetime | None = None) -> datetime:
     """Absolute next occurrence of `target` time-of-day, today or tomorrow, in tz (or local)."""
 

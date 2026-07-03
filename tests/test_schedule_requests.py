@@ -97,6 +97,28 @@ def test_extract_invalid_interval_weeks_returns_error():
     assert isinstance(requests[0], ScheduleRequestError)
 
 
+def test_extract_valid_one_shot_block():
+    text = '```schedule-task\nrun_at = "2026-07-05T09:00:00"\nprompt = "remind me"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert cleaned == ""
+    assert requests == [ScheduleRequest(run_at="2026-07-05T09:00:00", prompt="remind me")]
+
+
+def test_extract_both_cron_and_run_at_returns_error():
+    text = (
+        '```schedule-task\ncron = "0 9 * * *"\nrun_at = "2026-07-05T09:00:00"\n'
+        'prompt = "hi"\n```'
+    )
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
+def test_extract_invalid_run_at_returns_error():
+    text = '```schedule-task\nrun_at = "not a datetime"\nprompt = "hi"\n```'
+    cleaned, requests = extract_schedule_requests(text)
+    assert isinstance(requests[0], ScheduleRequestError)
+
+
 def test_extract_list_no_block_returns_text_unchanged():
     cleaned, count = extract_list_task_requests("just a normal reply")
     assert cleaned == "just a normal reply"

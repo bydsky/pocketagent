@@ -111,11 +111,22 @@ so which weeks are "on" doesn't drift across restarts):
 - **`scheduled_tasks.toml`** (`core/scheduled_tasks.py`) is a sibling file to
   `pocketagent.toml`, kept separate specifically so it holds no secrets and can be
   auto-reloaded by polling its mtime every 30s (`__main__._watch_scheduled_tasks_file`) with
-  no signal needed. Each `ScheduledTask` has a `platform`/`channel_id`/`user_id`,
-  `cron`/`timezone`/`interval_weeks`, `prompt`, and an `id` (persisted for entries added via
-  `append_scheduled_task`; generated fresh in-memory on load for hand-written entries that
-  omit it). `run_scheduled_task` fires the prompt into that session (skipped if no session
-  yet) and posts the reply proactively via `Platform.make_channel_ctx`.
+  no signal needed. Each `ScheduledTask` has a `platform`/`channel_id`/`user_id`, `prompt`,
+  an `id` (persisted for entries added via `append_scheduled_task`; generated fresh
+  in-memory on load for hand-written entries that omit it), `timezone`, and exactly one of
+  `cron`/`interval_weeks` (recurring, via `CronScheduler`) or `run_at` (an ISO 8601
+  datetime, one-shot, via `OneShotScheduler`/`core.scheduler.parse_run_at`) — a one-shot
+  task is removed from `scheduled_tasks.toml` by its own callback
+  (`__main__._build_task_schedulers`) right after it fires. Every time schedulers are
+  (re)built (startup, `SIGHUP`, or a `scheduled_tasks.toml` edit), `_build_task_schedulers`
+  also drops any `run_at` entry whose time has already passed instead of scheduling it —
+  otherwise a `OneShotScheduler` given a past instant fires (almost) immediately, which
+  would silently re-send a reminder late (e.g. the process was down through its fire time,
+  or a previous firing's own cleanup failed and left it behind). An invalid/unparseable
+  `run_at` is only logged and skipped, not removed, since that's a config error for a human
+  to fix rather than an expired entry to clean up. `run_scheduled_task` fires the prompt
+  into that session (skipped if no session yet) and posts the reply proactively via
+  `Platform.make_channel_ctx`.
 
 An agent can manage `scheduled_tasks.toml` itself, mid-conversation, by including one of
 three fenced blocks in its reply — `schedule-task` (add), `list-scheduled-tasks` (bare

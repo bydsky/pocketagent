@@ -32,13 +32,17 @@ coding agent from a chat app.
   the limit window drops anything still queued.
 - **Scheduled tasks**: entries in a separate `scheduled_tasks.toml` (kept
   apart from `pocketagent.toml`'s platform tokens) fire a prompt into a
-  specific channel's existing session on a schedule and post the reply
-  proactively — e.g. a nightly "summarize today's new vocabulary" digest or
-  a biweekly status check. Each entry is a standard 5-field cron expression
-  plus an optional `interval_weeks` for "every Nth week"; reuses that
-  channel's conversation history, and is skipped if the channel has no
-  session yet. The file is auto-reloaded (polled every 30s), so edits take
-  effect without a restart or signal. See `scheduled_tasks.example.toml`.
+  specific channel's existing session and post the reply proactively — e.g.
+  a nightly "summarize today's new vocabulary" digest, a biweekly status
+  check, or a one-off reminder. Each entry is either a standard 5-field cron
+  expression (recurring, plus an optional `interval_weeks` for "every Nth
+  week") or a `run_at` timestamp (fires once, then the entry removes itself
+  — including auto-cleaning up an entry whose time already passed by the
+  time pocketagent (re)loads it, e.g. after downtime, rather than firing it
+  late). Reuses that channel's conversation history, and is skipped if the
+  channel has no session yet. The file is auto-reloaded (polled every 30s),
+  so edits take effect without a restart or signal. See
+  `scheduled_tasks.example.toml`.
   - An agent can manage its own schedule mid-conversation — add, list, or
     cancel — just by including a `schedule-task` / `list-scheduled-tasks` /
     `remove-schedule-task` fenced block in a reply; pocketagent teaches it

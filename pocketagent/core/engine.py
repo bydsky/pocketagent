@@ -279,6 +279,7 @@ class Engine:
                 cron=request.cron,
                 timezone=request.timezone,
                 interval_weeks=request.interval_weeks,
+                run_at=request.run_at,
             )
             try:
                 task_id = append_scheduled_task(self._scheduled_tasks_dir, task)
@@ -286,9 +287,13 @@ class Engine:
                 logger.exception("failed to append scheduled task")
                 notes.append("Couldn't schedule that: failed to save it.")
                 continue
-            cadence = "" if request.interval_weeks == 1 else f" (every {request.interval_weeks} weeks)"
-            when = f"'{request.cron}' {request.timezone}".strip()
-            notes.append(f"Scheduled {when}{cadence} (id: {task_id}).")
+            if request.run_at:
+                when = f"'{request.run_at}' {request.timezone}".strip()
+                notes.append(f"Scheduled once at {when} (id: {task_id}).")
+            else:
+                cadence = "" if request.interval_weeks == 1 else f" (every {request.interval_weeks} weeks)"
+                when = f"'{request.cron}' {request.timezone}".strip()
+                notes.append(f"Scheduled {when}{cadence} (id: {task_id}).")
         return notes
 
     def _process_list_requests(self, count: int, msg: Message) -> list[str]:
@@ -327,9 +332,13 @@ class Engine:
             return "No scheduled tasks for this conversation."
         lines = []
         for t in matching:
-            when = f"'{t.cron}'{f' {t.timezone}' if t.timezone else ''}"
-            cadence = f" (every {t.interval_weeks} weeks)" if t.interval_weeks != 1 else ""
-            lines.append(f"- id: {t.id} -- {when}{cadence} -- {t.prompt}")
+            if t.run_at:
+                when = f"once at '{t.run_at}'{f' {t.timezone}' if t.timezone else ''}"
+                lines.append(f"- id: {t.id} -- {when} -- {t.prompt}")
+            else:
+                when = f"'{t.cron}'{f' {t.timezone}' if t.timezone else ''}"
+                cadence = f" (every {t.interval_weeks} weeks)" if t.interval_weeks != 1 else ""
+                lines.append(f"- id: {t.id} -- {when}{cadence} -- {t.prompt}")
         return "Scheduled tasks for this conversation:\n" + "\n".join(lines)
 
     def _remove_scheduled_task_text(self, msg: Message, task_id: str) -> str:

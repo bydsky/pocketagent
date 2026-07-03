@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .scheduler import validate_cron
+from .scheduler import validate_cron, validate_run_at
 from .types import Message
 
 if TYPE_CHECKING:
@@ -49,13 +49,18 @@ class ScheduledTask:
     the rest of the file) so it isn't guaranteed stable across reloads
     unless you set `id` explicitly.
 
-    `cron` is a standard 5-field cron expression (minute hour day month
-    weekday, e.g. "0 19 * * 4" for Thursdays at 19:00), evaluated in
-    `timezone` (an IANA name; omit for local time) -- see
-    core.scheduler.CronScheduler. `interval_weeks` (default 1) is a bolt-on
-    on top of that: standard cron has no native "every Nth week", so 2
-    means only every other week the cron expression matches actually fires
-    (anchored to a fixed reference date, not to whenever the task loads).
+    Exactly one of `cron` or `run_at` must be set. `cron` is a standard
+    5-field cron expression (minute hour day month weekday, e.g. "0 19 * *
+    4" for Thursdays at 19:00), evaluated in `timezone` (an IANA name; omit
+    for local time) -- see core.scheduler.CronScheduler; it recurs forever.
+    `interval_weeks` (default 1) is a bolt-on on top of that: standard cron
+    has no native "every Nth week", so 2 means only every other week the
+    cron expression matches actually fires (anchored to a fixed reference
+    date, not to whenever the task loads). `run_at` is an ISO 8601
+    datetime (e.g. "2026-07-05T09:00:00"), also evaluated in `timezone`
+    unless it already carries its own UTC offset -- see
+    core.scheduler.OneShotScheduler/parse_run_at; it fires once and the
+    entry is then removed from scheduled_tasks.toml.
 
     A daily cron naturally pairs with [daily_reset] (config.py): schedule
     it for just before the channel's reset time so the prompt still sees
@@ -66,10 +71,11 @@ class ScheduledTask:
     channel_id: str
     user_id: str
     prompt: str
-    cron: str
+    cron: str = ""
     id: str = ""
     timezone: str = ""
     interval_weeks: int = 1
+    run_at: str = ""
 
 
 def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
@@ -88,12 +94,25 @@ def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
     for raw in data.get("scheduled_tasks", []):
         channel_id = str(raw["channel_id"])
         cron_expr = raw.get("cron", "")
-        if not cron_expr:
-            raise ValueError(f"scheduled_tasks: entry for channel_id={channel_id!r} needs a 'cron' expression")
-        try:
-            validate_cron(cron_expr)
-        except ValueError as exc:
-            raise ValueError(f"scheduled_tasks: entry for channel_id={channel_id!r}: {exc}") from exc
+        run_at = raw.get("run_at", "")
+        if cron_expr and run_at:
+            raise ValueError(
+                f"scheduled_tasks: entry for channel_id={channel_id!r} can't set both 'cron' and 'run_at'"
+            )
+        if not cron_expr and not run_at:
+            raise ValueError(
+                f"scheduled_tasks: entry for channel_id={channel_id!r} needs a 'cron' expression or a 'run_at' timestamp"
+            )
+        if cron_expr:
+            try:
+                validate_cron(cron_expr)
+            except ValueError as exc:
+                raise ValueError(f"scheduled_tasks: entry for channel_id={channel_id!r}: {exc}") from exc
+        else:
+            try:
+                validate_run_at(run_at)
+            except ValueError as exc:
+                raise ValueError(f"scheduled_tasks: entry for channel_id={channel_id!r}: {exc}") from exc
 
         interval_weeks = raw.get("interval_weeks", 1)
         if not isinstance(interval_weeks, int) or isinstance(interval_weeks, bool) or interval_weeks < 1:
@@ -113,6 +132,7 @@ def load_scheduled_tasks(config_dir: str | Path) -> list[ScheduledTask]:
                 user_id=str(raw["user_id"]),
                 prompt=raw["prompt"],
                 cron=cron_expr,
+                run_at=run_at,
                 id=task_id or generate_task_id(),
                 timezone=raw.get("timezone", ""),
                 interval_weeks=interval_weeks,
@@ -140,8 +160,11 @@ def format_scheduled_task_toml(task: ScheduledTask) -> str:
         f"platform = {_toml_string(task.platform)}",
         f"channel_id = {_toml_string(task.channel_id)}",
         f"user_id = {_toml_string(task.user_id)}",
-        f"cron = {_toml_string(task.cron)}",
     ]
+    if task.run_at:
+        lines.append(f"run_at = {_toml_string(task.run_at)}")
+    else:
+        lines.append(f"cron = {_toml_string(task.cron)}")
     if task.timezone:
         lines.append(f"timezone = {_toml_string(task.timezone)}")
     if task.interval_weeks != 1:

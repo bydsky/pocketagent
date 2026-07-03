@@ -242,7 +242,7 @@ def test_load_scheduled_tasks_keeps_explicit_id(tmp_path):
     assert tasks[0].id == "my-task"
 
 
-def test_load_scheduled_tasks_requires_cron(tmp_path):
+def test_load_scheduled_tasks_requires_cron_or_run_at(tmp_path):
     path = tmp_path / "scheduled_tasks.toml"
     path.write_text(
         """
@@ -255,6 +255,54 @@ def test_load_scheduled_tasks_requires_cron(tmp_path):
     )
     with pytest.raises(ValueError):
         load_scheduled_tasks(tmp_path)
+
+
+def test_load_scheduled_tasks_rejects_both_cron_and_run_at(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        cron = "0 9 * * *"
+        run_at = "2026-07-05T09:00:00"
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)
+
+
+def test_load_scheduled_tasks_rejects_invalid_run_at(tmp_path):
+    path = tmp_path / "scheduled_tasks.toml"
+    path.write_text(
+        """
+        [[scheduled_tasks]]
+        platform = "discord"
+        channel_id = "1"
+        user_id = "1"
+        prompt = "hi"
+        run_at = "not a datetime"
+        """
+    )
+    with pytest.raises(ValueError):
+        load_scheduled_tasks(tmp_path)
+
+
+def test_append_and_load_one_shot_task(tmp_path):
+    task = ScheduledTask(
+        platform="discord", channel_id="1", user_id="1", prompt="hi", run_at="2026-07-05T09:00:00"
+    )
+
+    task_id = append_scheduled_task(tmp_path, task)
+
+    contents = (tmp_path / "scheduled_tasks.toml").read_text()
+    assert "run_at" in contents
+    assert "cron" not in contents
+    loaded = load_scheduled_tasks(tmp_path)
+    assert loaded == [replace(task, id=task_id)]
+    assert loaded[0].cron == ""
 
 
 def test_load_scheduled_tasks_rejects_invalid_cron(tmp_path):

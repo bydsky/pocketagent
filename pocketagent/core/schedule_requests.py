@@ -1,7 +1,7 @@
 """Lets an agent manage scheduled_tasks.toml (core/scheduled_tasks.py)
 itself, by including one of three fenced blocks anywhere in its chat reply.
 
-Add a task:
+Add a recurring task:
 
     ```schedule-task
     cron = "0 9 * * *"
@@ -15,6 +15,15 @@ or, for every other week instead of every week the cron expression matches:
     cron = "0 19 * * 4"
     interval_weeks = 2
     prompt = "Check on the build and report status."
+    ```
+
+or a one-shot reminder that fires once and then removes itself, by giving
+`run_at` (an ISO 8601 datetime) instead of `cron`:
+
+    ```schedule-task
+    run_at = "2026-07-05T09:00:00"
+    timezone = "America/New_York"
+    prompt = "Remind me to send the invoice."
     ```
 
 List the tasks scheduled for this conversation (a bare marker, no fields):
@@ -42,7 +51,7 @@ import re
 import tomllib
 from dataclasses import dataclass
 
-from .scheduler import validate_cron
+from .scheduler import validate_cron, validate_run_at
 
 _SCHEDULE_BLOCK_RE = re.compile(r"```schedule-task\s*\n(.*?)```", re.DOTALL)
 _LIST_BLOCK_RE = re.compile(r"```list-scheduled-tasks\s*\n?.*?```", re.DOTALL)
@@ -50,11 +59,12 @@ _REMOVE_BLOCK_RE = re.compile(r"```remove-schedule-task\s*\n(.*?)```", re.DOTALL
 
 SCHEDULE_TASK_INSTRUCTIONS = """\
 If the user asks to be reminded of something, or wants you to check on or \
-run something on a recurring basis going forward, wants to know what's \
-already scheduled, or wants to cancel something previously scheduled, you \
-can manage that yourself with a fenced code block anywhere in your reply:
+run something on a recurring basis going forward, or just once at a \
+specific future time, or wants to know what's already scheduled, or wants \
+to cancel something previously scheduled, you can manage that yourself \
+with a fenced code block anywhere in your reply:
 
-To add a schedule:
+To add a recurring schedule:
 ```schedule-task
 cron = "0 9 * * *"
 timezone = ""
@@ -64,10 +74,19 @@ prompt = "..."
 `prompt` (what to send yourself, reusing this conversation's history) and
 `cron` (a standard 5-field cron expression: minute hour day month weekday,
 e.g. "0 9 * * *" for daily at 9am, "0 19 * * 4" for Thursdays at 19:00, "0
-9 * * 1-5" for weekdays at 9am) are always required. `timezone` is an IANA
-name and may be omitted to use the local timezone. `interval_weeks`
-(default 1) is for "every Nth week" -- e.g. 2 to fire on only every other
-week the cron expression matches, useful for a biweekly schedule.
+9 * * 1-5" for weekdays at 9am) are required for a recurring schedule.
+`timezone` is an IANA name and may be omitted to use the local timezone.
+`interval_weeks` (default 1) is for "every Nth week" -- e.g. 2 to fire on
+only every other week the cron expression matches, useful for a biweekly
+schedule.
+
+To add a one-time reminder instead, give `run_at` (an ISO 8601 datetime)
+in place of `cron` -- it fires once and is then automatically removed:
+```schedule-task
+run_at = "2026-07-05T09:00:00"
+timezone = ""
+prompt = "..."
+```
 
 To see what's currently scheduled in this conversation:
 ```list-scheduled-tasks
@@ -89,9 +108,10 @@ describe their syntax to them."""
 @dataclass
 class ScheduleRequest:
     prompt: str
-    cron: str
+    cron: str = ""
     timezone: str = ""
     interval_weeks: int = 1
+    run_at: str = ""
 
 
 @dataclass
@@ -167,13 +187,24 @@ def _parse_schedule_block(body: str) -> ScheduleRequest | ScheduleRequestError:
     if not isinstance(prompt, str) or not prompt:
         return ScheduleRequestError("schedule-task block needs a 'prompt' as a string")
 
-    cron = data.get("cron")
-    if not isinstance(cron, str) or not cron:
-        return ScheduleRequestError("schedule-task block needs a 'cron' expression as a string")
-    try:
-        validate_cron(cron)
-    except ValueError as exc:
-        return ScheduleRequestError(f"schedule-task block: {exc}")
+    cron = data.get("cron", "")
+    run_at = data.get("run_at", "")
+    if not isinstance(cron, str) or not isinstance(run_at, str):
+        return ScheduleRequestError("schedule-task block's 'cron'/'run_at' must be strings")
+    if cron and run_at:
+        return ScheduleRequestError("schedule-task block can't set both 'cron' and 'run_at'")
+    if not cron and not run_at:
+        return ScheduleRequestError("schedule-task block needs either a 'cron' expression or a 'run_at' timestamp")
+    if cron:
+        try:
+            validate_cron(cron)
+        except ValueError as exc:
+            return ScheduleRequestError(f"schedule-task block: {exc}")
+    else:
+        try:
+            validate_run_at(run_at)
+        except ValueError as exc:
+            return ScheduleRequestError(f"schedule-task block: {exc}")
 
     timezone = data.get("timezone", "")
     if not isinstance(timezone, str):
@@ -183,7 +214,9 @@ def _parse_schedule_block(body: str) -> ScheduleRequest | ScheduleRequestError:
     if not isinstance(interval_weeks, int) or isinstance(interval_weeks, bool) or interval_weeks < 1:
         return ScheduleRequestError("schedule-task block's 'interval_weeks' must be a positive integer")
 
-    return ScheduleRequest(prompt=prompt, cron=cron, timezone=timezone, interval_weeks=interval_weeks)
+    return ScheduleRequest(
+        prompt=prompt, cron=cron, timezone=timezone, interval_weeks=interval_weeks, run_at=run_at
+    )
 
 
 def _parse_remove_block(body: str) -> RemoveTaskRequest | ScheduleRequestError:

@@ -6,10 +6,11 @@
 # agent's --resume), so it's skipped entirely if the channel has no session
 # yet. Repeat [[scheduled_tasks]] for more than one.
 #
-# Each entry needs:
+# Each entry needs exactly one of:
 #   cron = "0 21 * * *"   -- a standard 5-field cron expression (minute hour
 #                            day month weekday), evaluated in `timezone` (an
-#                            IANA name, or local time if unset). Examples:
+#                            IANA name, or local time if unset). Recurs
+#                            forever. Examples:
 #                              "0 21 * * *"    -- every day at 21:00
 #                              "0 19 * * 4"    -- every Thursday at 19:00
 #                              "0 9 * * 1-5"   -- weekdays at 09:00
@@ -18,6 +19,12 @@
 #                            in pocketagent.toml: schedule it just before
 #                            that channel's reset time so the prompt still
 #                            sees that day's conversation before it's cleared.
+# or:
+#   run_at = "2026-07-05T09:00:00"  -- an ISO 8601 datetime, also evaluated in
+#                            `timezone` unless it already carries its own UTC
+#                            offset. Fires once, then this entry is
+#                            automatically removed from the file -- for a
+#                            one-off reminder rather than a recurring job.
 #
 # Optionally also:
 #   id = "vocab-summary"  -- a short name/id for this entry (any string), shown
@@ -63,6 +70,15 @@
 # cron = "0 19 * * 4"              # every Thursday at 19:00
 # interval_weeks = 2               # omit for every week; 2 = every other week
 # prompt = "Post the biweekly status update."
+
+# [[scheduled_tasks]]
+# id = "invoice-reminder"
+# platform = "discord"
+# channel_id = "123456789012345678"
+# user_id = "234567890123456789"
+# run_at = "2026-07-05T09:00:00"   # fires once, then this entry is removed
+# timezone = ""                    # IANA name; omit to use the host's local timezone
+# prompt = "Remind me to send the invoice."
 
 # Entries here don't have to be hand-written: an agent can add/list/remove
 # them itself, mid-conversation, via schedule-task / list-scheduled-tasks /
