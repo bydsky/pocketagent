@@ -20,6 +20,16 @@ the time I sat back down at a terminal I'd forgotten. So I built
 agent CLI, so a Discord DM, a Telegram message, or a Slack thread *is* the
 terminal.
 
+**What it does, in short:**
+
+- **Chat is the terminal.** DM or @mention from Discord, Telegram, or Slack; the agent runs on your own machine — no public IP needed.
+- **Per-channel agents and workspaces.** One server, many channels — each pinned to its own agent (Claude Code, Codex, or any TUI via tmux), model, system prompt, and repo.
+- **The agent schedules itself.** It can add, list, and cancel its own recurring reminders and one-off nudges, mid-conversation — no separate cron file to babysit.
+- **Survives restarts and rate limits.** Conversations resume where they left off (`--resume`); hitting a usage limit queues messages and auto-replays them when it resets, instead of erroring.
+- **Yours to run.** A single self-hosted Python process. No hosted service, no telemetry.
+
+The rest of this is just those five, in more detail.
+
 ## 01 — What it actually does
 
 Each platform gets a **default agent** plus optional per-channel overrides —
