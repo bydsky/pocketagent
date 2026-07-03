@@ -2,7 +2,7 @@
 publishing; comparison claims are based on each project's public README as of
 writing, not hands-on testing. -->
 
-# Give your coding agent a phone number
+# One Discord server, four coding agents, zero mixed context
 
 pocketagent bridges Discord, Telegram, and Slack to Claude Code, Codex, and any
 terminal-based CLI agent — so you can drive a coding session from your phone,
