@@ -577,6 +577,7 @@ class ClaudeCodeAgent(Agent):
         work_dir: str,
         platform_system_prompt: str = "",
         show_footer: bool = False,
+        model: str = "",
     ) -> AgentSession:
         args = [
             "--print",
@@ -587,8 +588,12 @@ class ClaudeCodeAgent(Agent):
         ]
         if self.permission_mode:
             args += ["--permission-mode", self.permission_mode]
-        if self.model:
-            args += ["--model", self.model]
+        # A per-session override (from /model) wins over the configured
+        # model; both empty means no --model at all, leaving the choice to
+        # the CLI's own settings.json resolution.
+        effective_model = model or self.model
+        if effective_model:
+            args += ["--model", effective_model]
         if self.effort:
             args += ["--effort", self.effort]
         if session_id:

@@ -43,6 +43,13 @@ class Agent(ABC):
 
     name: str
 
+    # Whether start_session's `model` argument does anything for this backend.
+    # False lets callers (the built-in /model command) reject a switch up
+    # front instead of silently discarding the session to no effect -- see
+    # core/engine.py. Backends that drive an arbitrary terminal program
+    # (tmux) set this False.
+    supports_model_override: bool = True
+
     @abstractmethod
     async def start_session(
         self,
@@ -50,6 +57,7 @@ class Agent(ABC):
         work_dir: str,
         platform_system_prompt: str = "",
         show_footer: bool = False,
+        model: str = "",
     ) -> AgentSession:
         """Create or resume an interactive session rooted at work_dir.
 
@@ -64,6 +72,13 @@ class Agent(ABC):
         populate the reply footer (e.g. claude_code's rate-limit lookup)
         should skip that work when the channel isn't configured to show it;
         backends with no such cost can ignore it.
+
+        model, if non-empty, is a per-session override of this agent's own
+        configured model (set via the built-in /model command and persisted
+        by SessionStore). Empty means "use whatever this agent was
+        constructed with", which in turn may be empty, meaning "let the
+        underlying CLI pick". Backends that can't select a model per session
+        (e.g. tmux, which drives an arbitrary terminal program) ignore it.
         """
 
     async def stop(self) -> None:

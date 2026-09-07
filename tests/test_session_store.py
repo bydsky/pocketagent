@@ -28,7 +28,7 @@ class _FakeAgent(Agent):
     name = "fake"
 
     async def start_session(
-        self, session_id, work_dir, platform_system_prompt="", show_footer=False
+        self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
     ) -> AgentSession:
         return _FakeAgentSession()
 
@@ -106,7 +106,7 @@ async def test_clear_all_then_get_or_create_starts_fresh_session(tmp_path):
 
     class _CapturingAgent(_FakeAgent):
         async def start_session(
-            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
         ) -> AgentSession:
             captured["session_id"] = session_id
             return _FakeAgentSession()
@@ -114,3 +114,107 @@ async def test_clear_all_then_get_or_create_starts_fresh_session(tmp_path):
     await store.get_or_create("k1", _CapturingAgent(), str(tmp_path))
 
     assert captured["session_id"] is None
+
+
+class _CapturingModelAgent(_FakeAgent):
+    """Records the model argument each start_session call receives."""
+
+    def __init__(self):
+        self.models: list[str] = []
+
+    async def start_session(
+        self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
+    ) -> AgentSession:
+        self.models.append(model)
+        return _FakeAgentSession()
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_passes_model_override_to_agent(tmp_path):
+    store = SessionStore(tmp_path / "sessions.json")
+    agent = _CapturingModelAgent()
+
+    await store.get_or_create("k1", agent, str(tmp_path))
+    assert agent.models == [""]  # no override set yet
+
+    await store.set_model("k1", "opus")
+    await store.get_or_create("k1", agent, str(tmp_path))
+    assert agent.models == ["", "opus"]
+
+
+@pytest.mark.asyncio
+async def test_set_model_drops_live_session_and_resume_id(tmp_path):
+    """A switch is inert unless the session is dropped: claude --resume
+    restores the transcript's original model regardless of --model."""
+
+    store = SessionStore(tmp_path / "sessions.json")
+    agent = _FakeAgent()
+    session = await store.get_or_create("k1", agent, str(tmp_path))
+    store.set_resume_id("k1", "resume-abc")
+
+    await store.set_model("k1", "opus")
+
+    assert session.closed is True
+    assert store._live == {}
+    assert store._resume_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_set_model_only_affects_its_own_session_key(tmp_path):
+    store = SessionStore(tmp_path / "sessions.json")
+    agent = _FakeAgent()
+    other = await store.get_or_create("k2", agent, str(tmp_path))
+    store.set_resume_id("k2", "resume-other")
+
+    await store.set_model("k1", "opus")
+
+    assert other.closed is False
+    assert store._resume_ids == {"k2": "resume-other"}
+    assert store.get_model("k2") == ""
+
+
+@pytest.mark.asyncio
+async def test_model_override_persists_across_restart(tmp_path):
+    state_path = tmp_path / "sessions.json"
+    store = SessionStore(state_path)
+    await store.set_model("k1", "opus")
+
+    reloaded = SessionStore(state_path)
+    assert reloaded.get_model("k1") == "opus"
+
+
+@pytest.mark.asyncio
+async def test_model_override_survives_a_daily_reset(tmp_path):
+    """The chosen model outlives clear_all -- that's why it isn't stored
+    inside sessions.json, which every daily reset wipes."""
+
+    state_path = tmp_path / "sessions.json"
+    store = SessionStore(state_path)
+    await store.set_model("k1", "opus")
+    store.set_resume_id("k1", "resume-abc")
+
+    await store.clear_all()
+
+    assert store._resume_ids == {}
+    assert store.get_model("k1") == "opus"
+    assert SessionStore(state_path).get_model("k1") == "opus"
+
+
+@pytest.mark.asyncio
+async def test_set_model_empty_clears_the_override(tmp_path):
+    store = SessionStore(tmp_path / "sessions.json")
+    await store.set_model("k1", "opus")
+
+    await store.set_model("k1", "")
+
+    assert store.get_model("k1") == ""
+    assert SessionStore(tmp_path / "sessions.json").get_model("k1") == ""
+
+
+@pytest.mark.asyncio
+async def test_corrupt_model_overrides_file_degrades_to_no_override(tmp_path):
+    (tmp_path / "model_overrides.json").write_text("{not json")
+
+    store = SessionStore(tmp_path / "sessions.json")
+
+    assert store.get_model("k1") == ""

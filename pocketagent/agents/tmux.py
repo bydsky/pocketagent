@@ -365,6 +365,7 @@ class TmuxSession(AgentSession):
 
 class TmuxAgent(Agent):
     name = "tmux"
+    supports_model_override = False
 
     def __init__(
         self,
@@ -403,11 +404,18 @@ class TmuxAgent(Agent):
         work_dir: str,
         platform_system_prompt: str = "",
         show_footer: bool = False,
+        model: str = "",
     ) -> AgentSession:
         if self.agent_system_prompt or platform_system_prompt:
             logger.warning(
                 "tmux: agent_system_prompt/platform_system_prompt is configured but the "
                 "tmux agent has no way to apply one to an arbitrary terminal program; ignoring it"
+            )
+        if model:
+            logger.warning(
+                "tmux: a per-session model override (%r) was set, but the tmux agent drives "
+                "an arbitrary terminal program and has no way to select a model; ignoring it",
+                model,
             )
         target, window_name = resolve_target(self.session_name, self.pane, work_dir)
 

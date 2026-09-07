@@ -83,7 +83,8 @@ Supporting pieces in `core/`:
   `{{args}}` placeholders against a configured prompt template (or appends args to an
   `exec` shell command — exec args are not template-expanded, just appended). A third kind,
   `builtin` (an opaque tag Engine switches on instead of a user-defined prompt/exec), is how
-  Engine registers `/scheduled`/`/unschedule` into the same registry — see Scheduling below.
+  Engine registers `/model` (see Model switching below) and `/scheduled`/`/unschedule` (see
+  Scheduling below) into the same registry.
 - **`textsplit.py`**: splits long agent replies into platform-size chunks without breaking
   a message across an open fenced code block.
 - **`types.py`**: the shared `Message`, `Event`/`EventType`, `ImageAttachment`,
@@ -94,6 +95,27 @@ Supporting pieces in `core/`:
 `config.py` loads `pocketagent.toml` (via `tomllib`) into `AppConfig`/`PlatformConfig` and
 wires up the concrete `Agent`/`Platform` instances and `Engine` (`build_app`). New agent or
 platform types register themselves in `AGENT_FACTORIES` / `PLATFORM_FACTORIES` there.
+
+### Model switching (`/model`)
+
+A built-in `/model` command (registered by `Engine._register_builtin_commands`, unlike
+`/scheduled` *not* gated on `scheduled_tasks_dir`) shows or changes the model for the
+current conversation: `/model` reports it, `/model <name>` switches, `/model reset` drops
+back to the configured default. The chosen model is a per-`session_key` override held by
+`SessionStore` and persisted to `state_dir/model_overrides.json` — a sibling of
+`sessions.json` rather than a key inside it, because every daily reset wipes resume ids
+while a chosen model is meant to outlive that.
+
+`SessionStore.set_model` deliberately also clears that session (`clear_matching` on its own
+key): `claude --resume` restores the transcript's *original* model no matter what `--model`
+says, so without dropping the session the switch would silently do nothing until the next
+daily reset. The command's reply says the conversation was restarted for that reason.
+`get_or_create` reads the override and passes it to `Agent.start_session(..., model=)`,
+where claude_code/codex prefer it over their configured `model` and an empty value means
+"no `--model` flag at all", leaving the choice to the CLI's own settings resolution.
+Backends that can't select a model per session set the class attribute
+`Agent.supports_model_override = False` (tmux does) — Engine checks it and refuses the
+switch up front rather than discarding a session to no effect.
 
 ### Scheduling (`core/scheduler.py`, `core/scheduled_tasks.py`, `core/schedule_requests.py`)
 

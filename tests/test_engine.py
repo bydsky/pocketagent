@@ -38,11 +38,12 @@ class _FakeAgent(Agent):
         self.start_session_calls = 0
 
     async def start_session(
-        self, session_id, work_dir, platform_system_prompt="", show_footer=False
+        self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
     ) -> AgentSession:
         self.start_session_calls += 1
         self.last_platform_system_prompt = platform_system_prompt
         self.last_show_footer = show_footer
+        self.last_model = model
         return _FakeAgentSession()
 
 
@@ -197,7 +198,7 @@ async def test_on_message_writes_scheduled_task_and_shows_confirmation(tmp_path)
             )
 
     class _SchedulingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _SchedulingAgentSession()
 
     agent = _SchedulingAgent()
@@ -245,7 +246,7 @@ async def test_on_message_schedule_task_error_shown_and_nothing_written(tmp_path
             )
 
     class _BadSchedulingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _BadSchedulingAgentSession()
 
     agent = _BadSchedulingAgent()
@@ -282,7 +283,7 @@ async def test_on_message_writes_biweekly_scheduled_task_and_shows_confirmation(
             )
 
     class _SchedulingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _SchedulingAgentSession()
 
     agent = _SchedulingAgent()
@@ -328,7 +329,7 @@ async def test_on_message_lists_scheduled_tasks_for_this_conversation(tmp_path):
             )
 
     class _ListingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _ListingAgentSession()
 
     agent = _ListingAgent()
@@ -358,7 +359,7 @@ async def test_on_message_lists_no_scheduled_tasks_message_when_empty(tmp_path):
             yield Event(type=EventType.RESULT, content="```list-scheduled-tasks\n```", done=True)
 
     class _ListingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _ListingAgentSession()
 
     agent = _ListingAgent()
@@ -393,7 +394,7 @@ async def test_on_message_list_only_shows_this_channel_and_users_tasks(tmp_path)
             yield Event(type=EventType.RESULT, content="```list-scheduled-tasks\n```", done=True)
 
     class _ListingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _ListingAgentSession()
 
     agent = _ListingAgent()
@@ -431,7 +432,7 @@ async def test_on_message_removes_scheduled_task_by_id(tmp_path):
             )
 
     class _RemovingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _RemovingAgentSession()
 
     agent = _RemovingAgent()
@@ -465,7 +466,7 @@ async def test_on_message_remove_reports_not_found(tmp_path):
             )
 
     class _RemovingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _RemovingAgentSession()
 
     agent = _RemovingAgent()
@@ -502,7 +503,7 @@ async def test_on_message_remove_cannot_remove_another_channels_task(tmp_path):
             )
 
     class _RemovingAgent(_FakeAgent):
-        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False):
+        async def start_session(self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""):
             return _RemovingAgentSession()
 
     agent = _RemovingAgent()
@@ -678,7 +679,7 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
 
     class _AgentWithUsage(_FakeAgent):
         async def start_session(
-            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
         ) -> AgentSession:
             return _AgentSessionWithUsage()
 
@@ -747,7 +748,7 @@ async def test_error_matching_usage_limit_denial_queues_instead_of_showing_error
 
     class _DeniedAgent(_FakeAgent):
         async def start_session(
-            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
         ) -> AgentSession:
             return _DeniedAgentSession()
 
@@ -798,7 +799,7 @@ async def test_result_with_rate_limit_pct_100_marks_agent_for_next_message(tmp_p
 
     class _MaxedAgent(_FakeAgent):
         async def start_session(
-            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
         ) -> AgentSession:
             return _MaxedAgentSession()
 
@@ -858,7 +859,7 @@ async def test_on_message_queues_second_message_while_first_is_in_flight(tmp_pat
 
     class _GatedAgent(_FakeAgent):
         async def start_session(
-            self, session_id, work_dir, platform_system_prompt="", show_footer=False
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
         ) -> AgentSession:
             self.session = getattr(self, "session", None) or _GatedAgentSession()
             return self.session
@@ -886,3 +887,128 @@ async def test_on_message_queues_second_message_while_first_is_in_flight(tmp_pat
 
     assert order == ["send:first", "events:first", "send:second", "events:second"]
     assert platform.replies[-2:] == ["first", "second"]
+
+
+def _model_message(text: str) -> Message:
+    msg = _make_message()
+    msg.content = text
+    return msg
+
+
+@pytest.mark.asyncio
+async def test_model_command_registered_without_scheduled_tasks_dir(tmp_path):
+    """Unlike /scheduled, /model has no scheduled_tasks.toml dependency."""
+
+    engine, _ = _make_engine(tmp_path, scheduled_tasks_dir=None)
+
+    assert engine.commands.resolve("model") is not None
+    assert engine.commands.resolve("scheduled") is None
+
+
+@pytest.mark.asyncio
+async def test_model_command_reports_default_when_no_override(tmp_path):
+    engine, _ = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("/model"))
+
+    assert "configured default" in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_model_command_sets_override_and_next_session_uses_it(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("/model opus"))
+    assert "`opus`" in platform.replies[0]
+
+    await engine.on_message(platform, _model_message("hello"))
+    assert agent.last_model == "opus"
+
+
+@pytest.mark.asyncio
+async def test_model_command_drops_the_existing_session(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("hello"))
+    engine.session_store.set_resume_id("fake:1:1", "resume-abc")
+    assert agent.start_session_calls == 1
+
+    await engine.on_message(platform, _model_message("/model opus"))
+
+    # The resume id is gone, so the next turn starts a fresh session rather
+    # than resuming one that would keep its original model.
+    assert engine.session_store._resume_ids == {}
+    await engine.on_message(platform, _model_message("hello again"))
+    assert agent.start_session_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_model_command_reset_restores_the_default(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("/model opus"))
+    await engine.on_message(platform, _model_message("/model reset"))
+
+    assert engine.session_store.get_model("fake:1:1") == ""
+    await engine.on_message(platform, _model_message("hello"))
+    assert agent.last_model == ""
+
+
+@pytest.mark.asyncio
+async def test_model_command_reset_without_override_is_a_no_op_message(tmp_path):
+    engine, _ = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("/model reset"))
+
+    assert "already uses the configured default" in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_model_command_rejects_multiple_args(tmp_path):
+    engine, _ = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("/model opus sonnet"))
+
+    assert "Usage:" in platform.replies[0]
+    assert engine.session_store.get_model("fake:1:1") == ""
+
+
+@pytest.mark.asyncio
+async def test_model_command_refuses_on_agent_without_model_support(tmp_path):
+    """A tmux-style backend can't select a model, so the switch is refused
+    rather than dropping the session to no effect."""
+
+    engine, agent = _make_engine(tmp_path)
+    agent.supports_model_override = False
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("hello"))
+    engine.session_store.set_resume_id("fake:1:1", "resume-abc")
+
+    await engine.on_message(platform, _model_message("/model opus"))
+
+    assert "can't switch models" in platform.replies[-1]
+    assert engine.session_store.get_model("fake:1:1") == ""
+    assert engine.session_store._resume_ids == {"fake:1:1": "resume-abc"}
+
+
+@pytest.mark.asyncio
+async def test_user_defined_model_command_wins_over_builtin(tmp_path):
+    commands = CommandRegistry()
+    commands.add(CustomCommand(name="model", prompt="what model are you?"))
+    agent = _FakeAgent()
+    workspace = WorkspaceManager(tmp_path / "workspace")
+    engine = Engine(
+        agents={"fake": agent},
+        routers={"fake": Router(default_agent="fake", workspace=workspace)},
+        session_store=SessionStore(tmp_path / "sessions.json"),
+        commands=commands,
+    )
+
+    assert engine.commands.resolve("model").prompt == "what model are you?"

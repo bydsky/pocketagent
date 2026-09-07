@@ -41,7 +41,7 @@ class _FakeAgent(Agent):
     name = "fake"
 
     async def start_session(
-        self, session_id, work_dir, platform_system_prompt="", show_footer=False
+        self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
     ) -> AgentSession:
         return _FakeAgentSession()
 

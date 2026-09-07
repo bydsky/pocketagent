@@ -708,3 +708,62 @@ async def test_start_session_omits_system_prompt_flag_when_not_given(monkeypatch
         assert "--append-system-prompt" not in captured["args"]
     finally:
         await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_model_override_wins_over_configured_model(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent(model="sonnet")
+    session = await agent.start_session(None, "/tmp", model="opus")
+    try:
+        args = captured["args"]
+        assert args[args.index("--model") + 1] == "opus"
+        assert "sonnet" not in args
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_falls_back_to_configured_model(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent(model="sonnet")
+    session = await agent.start_session(None, "/tmp")
+    try:
+        args = captured["args"]
+        assert args[args.index("--model") + 1] == "sonnet"
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_start_session_omits_model_flag_when_neither_is_set(monkeypatch):
+    """No --model at all leaves the choice to the CLI's own settings.json."""
+
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(command, *args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    agent = ClaudeCodeAgent()
+    session = await agent.start_session(None, "/tmp")
+    try:
+        assert "--model" not in captured["args"]
+    finally:
+        await session.close()

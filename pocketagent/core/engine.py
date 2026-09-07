@@ -72,6 +72,7 @@ class Engine:
     # _register_builtin_commands itself).
     _LIST_SCHEDULED_COMMAND = "scheduled"
     _UNSCHEDULE_COMMAND = "unschedule"
+    _MODEL_COMMAND = "model"
 
     def __init__(
         self,
@@ -92,8 +93,7 @@ class Engine:
         # and any schedule-task-family block found is reported back as an
         # error instead of being actioned).
         self._scheduled_tasks_dir = scheduled_tasks_dir
-        if scheduled_tasks_dir is not None:
-            self._register_builtin_commands()
+        self._register_builtin_commands()
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Usage-limit backlog: keyed by agent_name, since the underlying limit
         # is account-wide (shared by every channel routed to that agent), not
@@ -136,15 +136,29 @@ class Engine:
             await self._handle_locked(platform, msg, route)
 
     def _register_builtin_commands(self) -> None:
-        """Register /scheduled and /unschedule as real CommandRegistry entries.
+        """Register /model, /scheduled and /unschedule as real CommandRegistry entries.
 
         Unlike the hardcoded-in-Engine approach this replaced, going through
         CommandRegistry means platforms that list `commands.all()` to
         register real slash commands / autocomplete (Discord, Telegram) pick
         these up automatically too. Skipped per-name if the user already
         defined their own command of that name in config -- theirs wins.
+
+        The two scheduling commands are additionally gated on
+        scheduled_tasks_dir, since without it there's no file to act on;
+        /model has no such dependency and is always registered.
         """
 
+        if self.commands.resolve(self._MODEL_COMMAND) is None:
+            self.commands.add(
+                CustomCommand(
+                    name=self._MODEL_COMMAND,
+                    builtin="set_model",
+                    description="Show or switch the model for this conversation",
+                )
+            )
+        if self._scheduled_tasks_dir is None:
+            return
         if self.commands.resolve(self._LIST_SCHEDULED_COMMAND) is None:
             self.commands.add(
                 CustomCommand(
@@ -167,7 +181,7 @@ class Engine:
         if expanded is not None:
             cmd, expanded_text = expanded
             if cmd.builtin is not None:
-                await self._handle_builtin_command(cmd, expanded_text, platform, msg)
+                await self._handle_builtin_command(cmd, expanded_text, platform, msg, route)
                 return
             if cmd.exec is not None:
                 async with platform.typing(msg.reply_ctx):
@@ -360,7 +374,8 @@ class Engine:
         return f"Couldn't find a scheduled task with id '{task_id}' in this conversation."
 
     async def _handle_builtin_command(
-        self, cmd: CustomCommand, args_text: str, platform: Platform, msg: Message
+        self, cmd: CustomCommand, args_text: str, platform: Platform, msg: Message,
+        route: ResolvedRoute,
     ) -> None:
         if cmd.builtin == "list_scheduled_tasks":
             await platform.reply(msg.reply_ctx, self._list_scheduled_tasks_text(msg))
@@ -375,7 +390,62 @@ class Engine:
                 return
             await platform.reply(msg.reply_ctx, self._remove_scheduled_task_text(msg, args[0]))
             return
+        if cmd.builtin == "set_model":
+            await platform.reply(msg.reply_ctx, await self._set_model_text(msg, args_text, route))
+            return
         raise AssertionError(f"unknown builtin command {cmd.builtin!r}")
+
+    async def _set_model_text(self, msg: Message, args_text: str, route: ResolvedRoute) -> str:
+        """Handle `/model`, `/model <name>` and `/model reset`.
+
+        Switching always drops the current session (see
+        SessionStore.set_model), so the reply says so plainly rather than
+        leaving the user to discover their conversation restarted.
+        """
+
+        args = args_text.split()
+        current = self.session_store.get_model(msg.session_key)
+
+        agent = self.agents.get(route.agent_name)
+        if agent is not None and not agent.supports_model_override:
+            # Refuse before touching anything: set_model would drop the
+            # session for a switch this backend can't honour anyway.
+            return (
+                f"The '{route.agent_name}' agent used by this channel can't switch models -- "
+                "it drives a terminal program that picks its own."
+            )
+
+        if not args:
+            shown = f"`{current}`" if current else "the configured default"
+            return (
+                f"This conversation uses {shown}.\n"
+                f"Switch with `/{self._MODEL_COMMAND} <name>` "
+                f"(e.g. `opus`, `sonnet`, `haiku`, or a full model id), "
+                f"or `/{self._MODEL_COMMAND} reset` to go back to the default.\n"
+                "Switching starts a new conversation."
+            )
+
+        if len(args) > 1:
+            return f"Usage: /{self._MODEL_COMMAND} [<name>|reset]  -- a model name has no spaces."
+
+        requested = args[0]
+        if requested in ("reset", "default"):
+            if not current:
+                return "This conversation already uses the configured default."
+            await self.session_store.set_model(msg.session_key, "")
+            return (
+                f"Model override removed (was `{current}`); back to the configured default.\n"
+                "Started a new conversation -- the previous one is no longer continued."
+            )
+
+        if requested == current:
+            return f"This conversation already uses `{requested}`."
+
+        await self.session_store.set_model(msg.session_key, requested)
+        return (
+            f"Model set to `{requested}` for this conversation.\n"
+            "Started a new conversation -- the previous one is no longer continued."
+        )
 
     async def _run_exec(self, command: str, work_dir: str) -> str:
         proc = await asyncio.create_subprocess_shell(

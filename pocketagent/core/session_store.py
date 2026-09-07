@@ -12,8 +12,16 @@ from .agent import Agent, AgentSession
 class SessionStore:
     def __init__(self, state_path: str | Path) -> None:
         self._state_path = Path(state_path)
+        # Per-session model overrides (set via the built-in /model command)
+        # live in a sibling file rather than inside sessions.json: resume ids
+        # are cleared routinely (every daily reset wipes them) while a chosen
+        # model is meant to outlive that, so mixing the two would mean either
+        # losing the choice each morning or teaching every clear path to
+        # preserve one key out of the blob.
+        self._model_path = self._state_path.with_name("model_overrides.json")
         self._live: dict[str, AgentSession] = {}
         self._resume_ids: dict[str, str] = {}
+        self._models: dict[str, str] = {}
         self._load()
 
     def _load(self) -> None:
@@ -22,10 +30,41 @@ class SessionStore:
                 self._resume_ids = json.loads(self._state_path.read_text())
             except (json.JSONDecodeError, OSError):
                 self._resume_ids = {}
+        if self._model_path.exists():
+            try:
+                self._models = json.loads(self._model_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                self._models = {}
 
     def _save(self) -> None:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._state_path.write_text(json.dumps(self._resume_ids, indent=2))
+
+    def _save_models(self) -> None:
+        self._model_path.parent.mkdir(parents=True, exist_ok=True)
+        self._model_path.write_text(json.dumps(self._models, indent=2))
+
+    def get_model(self, session_key: str) -> str:
+        """The per-session model override for session_key, or "" if none."""
+
+        return self._models.get(session_key, "")
+
+    async def set_model(self, session_key: str, model: str) -> None:
+        """Set (or clear, with model="") session_key's model override, and drop
+        its current session so the change actually takes effect.
+
+        Dropping is not optional: `claude --resume` restores the model the
+        transcript was started with, ignoring whatever --model we pass, so
+        without this the override would silently do nothing until the next
+        daily reset. Callers must tell the user their conversation was reset.
+        """
+
+        if model:
+            self._models[session_key] = model
+        else:
+            self._models.pop(session_key, None)
+        self._save_models()
+        await self.clear_matching(lambda key: key == session_key)
 
     def has_session(self, session_key: str) -> bool:
         """Whether session_key has ever had a turn -- live or persisted resume
@@ -56,7 +95,13 @@ class SessionStore:
             return existing
 
         resume_id = self._resume_ids.get(session_key)
-        session = await agent.start_session(resume_id, work_dir, platform_system_prompt, show_footer)
+        session = await agent.start_session(
+            resume_id,
+            work_dir,
+            platform_system_prompt,
+            show_footer,
+            self._models.get(session_key, ""),
+        )
         self._live[session_key] = session
         return session
 

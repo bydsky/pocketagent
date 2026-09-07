@@ -333,6 +333,7 @@ class CodexAgent(Agent):
         work_dir: str,
         platform_system_prompt: str = "",
         show_footer: bool = False,
+        model: str = "",
     ) -> AgentSession:
         system_prompt = _combine_system_prompts(self.agent_system_prompt, platform_system_prompt)
         return CodexSession(
@@ -341,7 +342,7 @@ class CodexAgent(Agent):
             session_id=session_id,
             sandbox=self.sandbox,
             ask_for_approval=self.ask_for_approval,
-            model=self.model,
+            model=model or self.model,
             system_prompt=system_prompt,
             extra_args=self.extra_args,
             skip_git_repo_check=self.skip_git_repo_check,
