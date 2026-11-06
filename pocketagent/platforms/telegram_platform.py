@@ -23,18 +23,23 @@ import contextlib
 import logging
 
 from telegram import BotCommand, Message, PhotoSize, Update
-from telegram.constants import ChatAction, ChatType
+from telegram.constants import ChatAction, ChatType, ParseMode
+from telegram.error import BadRequest
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from ..core.commands import CommandRegistry
 from ..core.platform import MessageHandler as PocketMessageHandler
 from ..core.platform import Platform, allow_list, csv_contains
 from ..core.textsplit import split_message
+from .telegram_format import markdown_to_telegram_html
 from ..core.types import FileAttachment, ImageAttachment, Message as PocketMessage
 
 logger = logging.getLogger(__name__)
 
-MAX_TELEGRAM_LEN = 4000
+# Raw markdown chunk size. Converting to HTML adds tags, so leave headroom
+# under Telegram's 4096-character hard limit for the formatted message.
+MAX_TELEGRAM_LEN = 3500
+TELEGRAM_HARD_LIMIT = 4096
 MAX_QUOTED_LEN = 500
 TYPING_REFRESH_SECONDS = 4
 
@@ -170,12 +175,12 @@ class TelegramPlatform(Platform):
     async def reply(self, reply_ctx, content: str) -> None:
         message: Message = reply_ctx
         for chunk in split_message(content, MAX_TELEGRAM_LEN):
-            await message.reply_text(chunk)
+            await _send_formatted(message.reply_text, chunk)
 
     async def send(self, reply_ctx, content: str) -> None:
         message: Message = reply_ctx
         for chunk in split_message(content, MAX_TELEGRAM_LEN):
-            await message.chat.send_message(chunk)
+            await _send_formatted(message.chat.send_message, chunk)
 
     def typing(self, reply_ctx):
         return _typing_indicator(reply_ctx)
@@ -187,6 +192,23 @@ class TelegramPlatform(Platform):
             await self._app.updater.stop()
         await self._app.stop()
         await self._app.shutdown()
+
+
+async def _send_formatted(send, chunk: str) -> None:
+    """Send one chunk of agent markdown as Telegram HTML.
+
+    Falls back to the raw text if the HTML would be over Telegram's limit or
+    Telegram rejects it (e.g. tags the converter nested wrongly), so a reply
+    is never lost to a formatting problem.
+    """
+    formatted = markdown_to_telegram_html(chunk)
+    if len(formatted) <= TELEGRAM_HARD_LIMIT:
+        try:
+            await send(formatted, parse_mode=ParseMode.HTML)
+            return
+        except BadRequest as exc:
+            logger.warning("telegram: HTML reply rejected (%s); resending as plain text", exc)
+    await send(chunk)
 
 
 def _strip_mention(text: str, mention: str) -> str:

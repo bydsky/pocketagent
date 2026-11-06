@@ -83,8 +83,8 @@ Supporting pieces in `core/`:
   `{{args}}` placeholders against a configured prompt template (or appends args to an
   `exec` shell command — exec args are not template-expanded, just appended). A third kind,
   `builtin` (an opaque tag Engine switches on instead of a user-defined prompt/exec), is how
-  Engine registers `/model` (see Model switching below) and `/scheduled`/`/unschedule` (see
-  Scheduling below) into the same registry.
+  Engine registers `/new`, `/model` (see Model switching below) and `/scheduled`/`/unschedule`
+  (see Scheduling below) into the same registry.
 - **`textsplit.py`**: splits long agent replies into platform-size chunks without breaking
   a message across an open fenced code block.
 - **`types.py`**: the shared `Message`, `Event`/`EventType`, `ImageAttachment`,
@@ -101,6 +101,14 @@ Supporting pieces in `core/`:
 `config.py` loads `pocketagent.toml` (via `tomllib`) into `AppConfig`/`PlatformConfig` and
 wires up the concrete `Agent`/`Platform` instances and `Engine` (`build_app`). New agent or
 platform types register themselves in `AGENT_FACTORIES` / `PLATFORM_FACTORIES` there.
+
+### New conversation (`/new`)
+
+A built-in `/new` command (always registered, like `/model`) starts a fresh conversation
+for the current `session_key`: `SessionStore.clear_matching` on that one key closes the
+live `AgentSession` and forgets its resume id, so the next message starts a brand-new agent
+session instead of `--resume`-ing — the daily reset, on demand, for one conversation. The
+`/model` override is kept, since it's stored separately (see below) for exactly this reason.
 
 ### Model switching (`/model`)
 

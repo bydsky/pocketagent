@@ -41,6 +41,7 @@ class _FakeAgent(Agent):
         self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
     ) -> AgentSession:
         self.start_session_calls += 1
+        self.last_session_id = session_id
         self.last_platform_system_prompt = platform_system_prompt
         self.last_show_footer = show_footer
         self.last_model = model
@@ -697,6 +698,42 @@ async def test_on_message_appends_footer_when_result_has_usage_data(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_text_events_between_tool_calls_stay_separate_and_each_translation_is_quoted(tmp_path):
+    # Real case: Claude Code sent one text block, ran a tool, sent another. bbilingual
+    # appended a translation line to each block. Joining them with "" glued "进行。"
+    # onto "It works.", so that translation lost its quote.
+    blocks = [
+        "I'll test the site on that port.\n\x1b[90m我会在那个端口上测试该站点。\x1b[39m",
+        "It works. I'll also check the owner account.\n\x1b[90m有效。我还会检查 owner 账户。\x1b[39m",
+        "You can now use it remotely.\n\x1b[90m现在你可以远程使用它了。\x1b[39m",
+    ]
+
+    class _MultiTextSession(_FakeAgentSession):
+        async def events(self) -> AsyncIterator[Event]:
+            for block in blocks:
+                yield Event(type=EventType.TEXT, content=block)
+            yield Event(type=EventType.RESULT, content="", done=True)
+
+    class _MultiTextAgent(_FakeAgent):
+        async def start_session(
+            self, session_id, work_dir, platform_system_prompt="", show_footer=False, model=""
+        ) -> AgentSession:
+            return _MultiTextSession()
+
+    engine, _ = _make_engine(tmp_path, show_footer=False)
+    engine.agents["fake"] = _MultiTextAgent()
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _make_message())
+
+    assert platform.replies == [
+        "I'll test the site on that port.\n> 我会在那个端口上测试该站点。\n\n"
+        "It works. I'll also check the owner account.\n> 有效。我还会检查 owner 账户。\n\n"
+        "You can now use it remotely.\n> 现在你可以远程使用它了。"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_clear_all_sessions_closes_live_sessions_and_forgets_resume_ids(tmp_path):
     engine, _ = _make_engine(tmp_path)
     platform = _FakePlatform()
@@ -1116,3 +1153,84 @@ async def test_failed_upload_reports_back(tmp_path):
     await engine.on_message(platform, _make_message())
 
     assert platform.replies == ["Couldn't upload pic.png."]
+
+
+# --- /new -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_command_registered_without_scheduled_tasks_dir(tmp_path):
+    engine, _ = _make_engine(tmp_path, scheduled_tasks_dir=None)
+
+    assert engine.commands.resolve("new") is not None
+
+
+@pytest.mark.asyncio
+async def test_new_command_starts_a_fresh_session(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("hello"))
+    engine.session_store.set_resume_id("fake:1:1", "resume-abc")
+    assert agent.start_session_calls == 1
+
+    await engine.on_message(platform, _model_message("/new"))
+
+    assert "Started a new conversation" in platform.replies[-1]
+    assert engine.session_store._resume_ids == {}
+    await engine.on_message(platform, _model_message("hello again"))
+    assert agent.start_session_calls == 2
+    assert agent.last_session_id is None
+
+
+@pytest.mark.asyncio
+async def test_new_command_does_not_reach_the_agent(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("/new"))
+
+    assert agent.start_session_calls == 0
+    assert "no conversation to reset yet" in platform.replies[0]
+
+
+@pytest.mark.asyncio
+async def test_new_command_keeps_the_model_override(tmp_path):
+    engine, agent = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("/model opus"))
+    await engine.on_message(platform, _model_message("hello"))
+    await engine.on_message(platform, _model_message("/new"))
+
+    assert "still using `opus`" in platform.replies[-1]
+    await engine.on_message(platform, _model_message("hello again"))
+    assert agent.last_model == "opus"
+
+
+@pytest.mark.asyncio
+async def test_new_command_only_resets_its_own_conversation(tmp_path):
+    engine, _ = _make_engine(tmp_path)
+    platform = _FakePlatform()
+
+    await engine.on_message(platform, _model_message("hello"))
+    engine.session_store.set_resume_id("fake:1:1", "mine")
+    engine.session_store.set_resume_id("fake:2:2", "someone-else")
+
+    await engine.on_message(platform, _model_message("/new"))
+
+    assert engine.session_store._resume_ids == {"fake:2:2": "someone-else"}
+
+
+@pytest.mark.asyncio
+async def test_user_defined_new_command_wins_over_builtin(tmp_path):
+    commands = CommandRegistry()
+    commands.add(CustomCommand(name="new", prompt="scaffold a new project"))
+    engine = Engine(
+        agents={"fake": _FakeAgent()},
+        routers={"fake": Router(default_agent="fake", workspace=WorkspaceManager(tmp_path / "w"))},
+        session_store=SessionStore(tmp_path / "sessions.json"),
+        commands=commands,
+    )
+
+    assert engine.commands.resolve("new").prompt == "scaffold a new project"

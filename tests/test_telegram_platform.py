@@ -2,7 +2,8 @@ import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from telegram.constants import ChatType
+from telegram.constants import ChatType, ParseMode
+from telegram.error import BadRequest
 
 from pocketagent.core.commands import CommandRegistry, CustomCommand
 from pocketagent.core.platform import csv_contains
@@ -192,7 +193,7 @@ async def test_reply_sends_via_reply_text():
 
     await platform.reply(message, "hello there")
 
-    message.reply_text.assert_awaited_once_with("hello there")
+    message.reply_text.assert_awaited_once_with("hello there", parse_mode=ParseMode.HTML)
 
 
 @pytest.mark.asyncio
@@ -203,7 +204,31 @@ async def test_send_sends_via_chat_send_message():
 
     await platform.send(message, "hello there")
 
-    chat.send_message.assert_awaited_once_with("hello there")
+    chat.send_message.assert_awaited_once_with("hello there", parse_mode=ParseMode.HTML)
+
+
+@pytest.mark.asyncio
+async def test_reply_converts_markdown_to_html():
+    platform = TelegramPlatform(token="t")
+    message = _FakeMessage("hi", _FakeUser(id=2), _FakeChat(id=10))
+
+    await platform.reply(message, "**done** with `x < y`")
+
+    message.reply_text.assert_awaited_once_with(
+        "<b>done</b> with <code>x &lt; y</code>", parse_mode=ParseMode.HTML
+    )
+
+
+@pytest.mark.asyncio
+async def test_reply_falls_back_to_plain_text_when_html_rejected():
+    platform = TelegramPlatform(token="t")
+    message = _FakeMessage("hi", _FakeUser(id=2), _FakeChat(id=10))
+    message.reply_text.side_effect = [BadRequest("Can't parse entities"), None]
+
+    await platform.reply(message, "**done**")
+
+    assert message.reply_text.await_args_list[-1].args == ("**done**",)
+    assert message.reply_text.await_args_list[-1].kwargs == {}
 
 
 # --- typing indicator ------------------------------------------------------------

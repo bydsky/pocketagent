@@ -158,8 +158,27 @@ class DiscordPlatform(Platform):
         async def on_message(message: discord.Message) -> None:
             await self._on_discord_message(message)
 
-        self._gateway_task = asyncio.create_task(client.start(self.token))
-        await asyncio.wait_for(client.wait_until_ready(), timeout=30)
+        # Log in before waiting for readiness: discord.py only initialises the
+        # client's ready event inside login(), so calling wait_until_ready()
+        # before a background client.start() task has reached login() raises
+        # "Client has not been properly initialised". Logging in here also
+        # surfaces a bad token immediately as discord.LoginFailure.
+        await client.login(self.token)
+        self._gateway_task = asyncio.create_task(client.connect())
+        ready_task = asyncio.create_task(client.wait_until_ready())
+        done, _ = await asyncio.wait(
+            {ready_task, self._gateway_task},
+            timeout=30,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if ready_task not in done:
+            ready_task.cancel()
+            if self._gateway_task in done:
+                # connect() ended before READY: re-raise its error (e.g.
+                # PrivilegedIntentsRequired) instead of a bare timeout.
+                self._gateway_task.result()
+                raise RuntimeError("discord: gateway connection closed before ready")
+            raise TimeoutError("discord: timed out waiting for gateway READY")
 
     def _register_slash_commands(self, tree: app_commands.CommandTree) -> None:
         if not self.commands:

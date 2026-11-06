@@ -233,6 +233,15 @@ def main() -> None:
         level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # httpx logs every request URL at INFO, and the Telegram Bot API puts the
+    # bot token in the URL path (/bot<token>/getUpdates), so leaving it at the
+    # root level writes the token to the log every polling cycle -- even
+    # without -v. Only let its warnings/errors through. python-telegram-bot's
+    # bot logger does the same at DEBUG ("Set Bot API URL: .../bot<token>"),
+    # so cap it at INFO so -v doesn't leak the token either.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("telegram.ext.ExtBot").setLevel(logging.INFO)
+    logging.getLogger("telegram.Bot").setLevel(logging.INFO)
 
     if args.cmd == "run":
         try:
